@@ -49,43 +49,53 @@ type ViewServer struct {
 
 func (vs *ViewServer) promote(latestView *View) bool {
 	anyChange := false
+	// promote the backup (if there's one) to the primary (if there's no one).
+	if latestView.Backup != "" && latestView.Primary == "" {
+		maybePrintf("Promote S%v Back -> Prim", latestView.Backup)
+		latestView.Primary = latestView.Backup
+		latestView.Backup = ""
+		anyChange = true
+
+		// promote the idle server (if there's one) to the backup.
+		if vs.idleServer != "" {
+			maybePrintf("Promote S%v Idle -> Back", vs.idleServer)
+			latestView.Backup = vs.idleServer
+			vs.idleServer = ""
+		}
+	}
+
 	// promote the idle server (if there's one) to the backup (if there's no one).
 	if vs.idleServer != "" && latestView.Backup == "" {
-		maybePrintf("Promote %v Idle -> Back", vs.idleServer)
+		maybePrintf("Promote S%v Idle -> Back", vs.idleServer)
 		latestView.Backup = vs.idleServer
 		vs.idleServer = ""
 		anyChange = true
 	}
 
-	// promote the backup (if there's one) to the primary (if there's no one).
-	if latestView.Backup != "" && latestView.Primary == "" {
-		maybePrintf("Promote %v Back -> Prim", latestView.Backup)
-		latestView.Primary = latestView.Backup
-		latestView.Backup = ""
-		anyChange = true
-	}
 	return anyChange
 }
 
-func (vs *ViewServer) updateLatestView(latestView *View) {
-	vs.latestViewnum += 1
-	latestView.Viewnum = vs.latestViewnum
+func (vs *ViewServer) maybeUpdateLatestView(latestView *View) {
 	prev := vs.views[vs.latestViewnum]
-	vs.views[vs.latestViewnum] = *latestView
-	maybePrintf("Update latest view (%v, %v, %v) -> (%v, %v, %v)", prev.Viewnum, prev.Primary, prev.Backup,
-		latestView.Viewnum, latestView.Primary, latestView.Backup)
+	if latestView.Primary != prev.Primary || latestView.Backup != prev.Backup {
+		vs.latestViewnum += 1
+		latestView.Viewnum = vs.latestViewnum
+		vs.views[vs.latestViewnum] = *latestView
+		maybePrintf("Update latest view (%v, %v, %v) -> (%v, %v, %v)", prev.Viewnum, prev.Primary, prev.Backup,
+			latestView.Viewnum, latestView.Primary, latestView.Backup)
+	}
 }
 
 func (vs *ViewServer) maybeSwitchView(latestView *View) {
 	// switch to the next view if there's one and if the primary of the current view has acked.
 	if _, exist := vs.views[vs.currViewnum+1]; exist && vs.primaryAcked {
-		vs.currViewnum += 1
-		// reset.
-		vs.primaryAcked = false
 		curr := vs.views[vs.currViewnum]
 		next := vs.views[vs.currViewnum+1]
 		maybePrintf("Update current view (%v, %v, %v) -> (%v, %v, %v)", curr.Viewnum, curr.Primary, curr.Backup,
 			next.Viewnum, next.Primary, next.Backup)
+		vs.currViewnum += 1
+		// reset.
+		vs.primaryAcked = false
 	}
 }
 
@@ -96,6 +106,8 @@ func (vs *ViewServer) Ping(args *PingArgs, reply *PingReply) error {
 
 	server := args.Me
 	serverViewnum := args.Viewnum
+
+	maybePrintf("Ping (S%v, V%v)", server, serverViewnum)
 
 	// the first ping the view service ever received incurs a view change from view 0 to view 1,
 	// and the pinging server becomes the primary of view 1.
@@ -109,6 +121,8 @@ func (vs *ViewServer) Ping(args *PingArgs, reply *PingReply) error {
 		}
 		vs.views[vs.currViewnum] = view
 		reply.View = view
+		maybePrintf("S%v becomes the primary of view %v", server, vs.currViewnum)
+		maybePrintf("Update current view and latest view to (%v, %v, %v)", view.Viewnum, view.Primary, view.Backup)
 		return nil
 	}
 
@@ -144,12 +158,14 @@ func (vs *ViewServer) Ping(args *PingArgs, reply *PingReply) error {
 
 	// if the latest view has any change, generate a new view.
 	if vs.promote(&latestView) || anyChange {
-		vs.updateLatestView(&latestView)
-		vs.maybeSwitchView(&latestView)
+		vs.maybeUpdateLatestView(&latestView)
 	}
+	vs.maybeSwitchView(&latestView)
 
 	// reply the server with the current view.
 	reply.View = vs.views[vs.currViewnum]
+
+	maybePrintf("Reply S%v (%v, %v, %v)", server, reply.View.Viewnum, reply.View.Primary, reply.View.Backup)
 
 	// update last ping time for this server.
 	vs.lastPingTime[server] = time.Now()
@@ -210,9 +226,9 @@ func (vs *ViewServer) tick() {
 
 	// if the latest view has any change, generate a new view.
 	if vs.promote(&latestView) || anyChange {
-		vs.updateLatestView(&latestView)
-		vs.maybeSwitchView(&latestView)
+		vs.maybeUpdateLatestView(&latestView)
 	}
+	vs.maybeSwitchView(&latestView)
 }
 
 // tell the server to shut itself down.
