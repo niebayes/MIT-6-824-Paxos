@@ -28,12 +28,10 @@ type ViewServer struct {
 	// However, there's restriction that the view service could only change its view until it has received a ping from
 	// the primary of the current view.
 
-	// view number of the current view, the view the servers will see from the ping reply.
-	currViewnum uint
-	// view number of the latest view (not necessarily the next view), the view the view service has ever seen.
-	latestViewnum uint
-	// key: view number, value: the corresponding view.
-	views map[uint]View
+	// current view, the view the servers will see.
+	currentView View
+	// latest view, the view the view service has ever seen.
+	latestView View
 	// true if the primary of the current view has acked, i.e. the view service has received a ping
 	// from the primary and the ping view number equals to the current view number.
 	primaryAcked bool
@@ -47,53 +45,58 @@ type ViewServer struct {
 	idleServer string
 }
 
-func (vs *ViewServer) promote(latestView *View) bool {
-	anyChange := false
-	// promote the backup (if there's one) to the primary (if there's no one).
-	if latestView.Backup != "" && latestView.Primary == "" {
-		maybePrintf("Promote S%v Back -> Prim", latestView.Backup)
-		latestView.Primary = latestView.Backup
-		latestView.Backup = ""
-		anyChange = true
+func (vs *ViewServer) maybeRemoveServer(server string) {
+	if vs.latestView.Primary == server {
+		vs.latestView.Primary = ""
+	}
+	if vs.latestView.Backup == server {
+		vs.latestView.Backup = ""
+	}
+	if vs.idleServer == server {
+		vs.idleServer = ""
+	}
+}
+
+func (vs *ViewServer) maybePromote() {
+	// try to promote the backup to the primary (if there's no primary),
+	// and try to promote the idle server to the backup (if there's a primary).
+
+	// an idle server can be promoted to the backup if the followings are true:
+	// (1) there's no backup.
+	// (2) there's a primary.
+	// the second condition bounds that an uninitialized idle server cannot become
+	// the primary directly. If it could, then the previous data might get lost since
+	// there's no primary and no backup, and hence no one could transfer data to the idle server.
+	if vs.idleServer != "" && vs.latestView.Backup == "" && vs.latestView.Primary != "" {
+		maybePrintf("Promote S%v Idle -> Back", vs.idleServer)
+		vs.latestView.Backup = vs.idleServer
+		vs.idleServer = ""
+	}
+
+	if vs.latestView.Backup != "" && vs.latestView.Primary == "" {
+		maybePrintf("Promote S%v Back -> Prim", vs.latestView.Backup)
+		vs.latestView.Primary = vs.latestView.Backup
+		vs.latestView.Backup = ""
 
 		// promote the idle server (if there's one) to the backup.
 		if vs.idleServer != "" {
 			maybePrintf("Promote S%v Idle -> Back", vs.idleServer)
-			latestView.Backup = vs.idleServer
+			vs.latestView.Backup = vs.idleServer
 			vs.idleServer = ""
 		}
 	}
-
-	// promote the idle server (if there's one) to the backup (if there's no one).
-	if vs.idleServer != "" && latestView.Backup == "" {
-		maybePrintf("Promote S%v Idle -> Back", vs.idleServer)
-		latestView.Backup = vs.idleServer
-		vs.idleServer = ""
-		anyChange = true
-	}
-
-	return anyChange
 }
 
-func (vs *ViewServer) maybeUpdateLatestView(latestView *View) {
-	prev := vs.views[vs.latestViewnum]
-	if latestView.Primary != prev.Primary || latestView.Backup != prev.Backup {
-		vs.latestViewnum += 1
-		latestView.Viewnum = vs.latestViewnum
-		vs.views[vs.latestViewnum] = *latestView
-		maybePrintf("Update latest view (%v, %v, %v) -> (%v, %v, %v)", prev.Viewnum, prev.Primary, prev.Backup,
-			latestView.Viewnum, latestView.Primary, latestView.Backup)
-	}
-}
-
-func (vs *ViewServer) maybeSwitchView(latestView *View) {
-	// switch to the next view if there's one and if the primary of the current view has acked.
-	if _, exist := vs.views[vs.currViewnum+1]; exist && vs.primaryAcked {
-		curr := vs.views[vs.currViewnum]
-		next := vs.views[vs.currViewnum+1]
+func (vs *ViewServer) maybeSwitchView() {
+	// switch to the latest view if the current view differs with the latest view
+	// and if the primary of the current view has acked.
+	if vs.currentView.Primary != vs.latestView.Primary || vs.currentView.Backup != vs.latestView.Backup {
+		curr := vs.currentView
+		vs.latestView.Viewnum = vs.currentView.Viewnum + 1
+		next := vs.latestView
 		maybePrintf("Update current view (%v, %v, %v) -> (%v, %v, %v)", curr.Viewnum, curr.Primary, curr.Backup,
 			next.Viewnum, next.Primary, next.Backup)
-		vs.currViewnum += 1
+		vs.currentView = vs.latestView
 		// reset.
 		vs.primaryAcked = false
 	}
@@ -111,64 +114,55 @@ func (vs *ViewServer) Ping(args *PingArgs, reply *PingReply) error {
 
 	// the first ping the view service ever received incurs a view change from view 0 to view 1,
 	// and the pinging server becomes the primary of view 1.
-	if vs.currViewnum == 0 {
-		vs.currViewnum = 1
-		vs.latestViewnum = 1
+	if vs.currentView.Viewnum == 0 {
 		view := View{
-			Viewnum: vs.currViewnum,
+			Viewnum: 1,
 			Primary: server,
 			Backup:  "",
 		}
-		vs.views[vs.currViewnum] = view
+		vs.currentView = view
+		vs.latestView = view
 		reply.View = view
-		maybePrintf("S%v becomes the primary of view %v", server, vs.currViewnum)
 		maybePrintf("Update current view and latest view to (%v, %v, %v)", view.Viewnum, view.Primary, view.Backup)
 		return nil
 	}
-
-	// the latest view, i.e. the most recent roles the view service has assigned to servers.
-	latestView := vs.views[vs.latestViewnum]
-	anyChange := false
 
 	// set primaryAcked to true if the pinging server is the primary of the current view and the ping
 	// view number matches against the current view number.
 	// it's possible that the primary of the current view dies but restarts in a short. The second
 	// condition could rule out this possibility.
-	if vs.views[vs.currViewnum].Primary == server && vs.currViewnum == serverViewnum {
+	if vs.currentView.Primary == server && vs.currentView.Viewnum == serverViewnum {
 		vs.primaryAcked = true
 		maybePrintf("Primary S%v acked in view %v", server, serverViewnum)
 	}
 
 	if serverViewnum == 0 {
-		// view number 0 indicates a restart of the server.
-		// a restarted server becomes the idle server initially.
-		vs.idleServer = server
-		// remove the restarted server from the latest view (if it's in).
-		if latestView.Primary == server {
-			latestView.Primary = ""
-			anyChange = true
-		}
-		if latestView.Backup == server {
-			latestView.Backup = ""
-			anyChange = true
-		}
+		// view number 0 indicates the server has just restarted or it's an idle server.
+		vs.maybeRemoveServer(server)
+	}
 
+	if vs.primaryAcked {
+		vs.maybePromote()
+		vs.maybeSwitchView()
+	}
+
+	if serverViewnum == 0 {
+		// the restarted server becomes the idle server.
+		// we leave the idle server not involved in this round of promotion and view switching.
+		// it could take part in the next round if it keeps pinging.
+		// this makes the code simpler.
+		vs.idleServer = server
 		maybePrintf("S%v becomes the idle server", server)
 	}
 
-	// if the latest view has any change, generate a new view.
-	if vs.promote(&latestView) || anyChange {
-		vs.maybeUpdateLatestView(&latestView)
-	}
-	vs.maybeSwitchView(&latestView)
-
 	// reply the server with the current view.
-	reply.View = vs.views[vs.currViewnum]
-
-	maybePrintf("Reply S%v (%v, %v, %v)", server, reply.View.Viewnum, reply.View.Primary, reply.View.Backup)
+	reply.View = vs.currentView
 
 	// update last ping time for this server.
 	vs.lastPingTime[server] = time.Now()
+
+	maybePrintf("Reply S%v (%v, %v, %v)", server, reply.View.Viewnum, reply.View.Primary, reply.View.Backup)
+	maybePrintf("Latest view (%v, %v, %v)", vs.latestView.Viewnum, vs.latestView.Primary, vs.latestView.Backup)
 
 	// no error.
 	return nil
@@ -180,7 +174,7 @@ func (vs *ViewServer) Get(args *GetArgs, reply *GetReply) error {
 	defer vs.mu.Unlock()
 
 	// reply the server with the current view.
-	reply.View = vs.views[vs.currViewnum]
+	reply.View = vs.currentView
 
 	// no error.
 	return nil
@@ -204,31 +198,16 @@ func (vs *ViewServer) tick() {
 	}
 
 	// remove all dead servers.
-	latestView := vs.views[vs.latestViewnum]
-	anyChange := false
 	for _, server := range deadServers {
 		delete(vs.lastPingTime, server)
-
-		if latestView.Primary == server {
-			latestView.Primary = ""
-			anyChange = true
-		}
-		if latestView.Backup == server {
-			latestView.Backup = ""
-			anyChange = true
-		}
-		if vs.idleServer == server {
-			vs.idleServer = ""
-		}
-
+		vs.maybeRemoveServer(server)
 		maybePrintf("S%v is dead", server)
 	}
 
-	// if the latest view has any change, generate a new view.
-	if vs.promote(&latestView) || anyChange {
-		vs.maybeUpdateLatestView(&latestView)
+	if vs.primaryAcked {
+		vs.maybePromote()
+		vs.maybeSwitchView()
 	}
-	vs.maybeSwitchView(&latestView)
 }
 
 // tell the server to shut itself down.
@@ -252,10 +231,8 @@ func (vs *ViewServer) GetRPCCount() int32 {
 func StartServer(me string) *ViewServer {
 	vs := new(ViewServer)
 	vs.me = me
-	vs.currViewnum = 0
-	vs.latestViewnum = 0
-	vs.views = make(map[uint]View)
-	vs.views[vs.currViewnum] = View{}
+	vs.currentView = View{Viewnum: 0}
+	vs.latestView = View{Viewnum: 0}
 	vs.primaryAcked = false
 	vs.lastPingTime = make(map[string]time.Time)
 	vs.idleServer = ""
