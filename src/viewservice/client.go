@@ -3,10 +3,8 @@ package viewservice
 import "net/rpc"
 import "fmt"
 
-//
 // the viewservice Clerk lives in the client
 // and maintains a little state.
-//
 type Clerk struct {
 	me     string // client's name (host:port)
 	server string // viewservice's host:port
@@ -14,12 +12,12 @@ type Clerk struct {
 
 func MakeClerk(me string, server string) *Clerk {
 	ck := new(Clerk)
-	ck.me = me
+	// ck.me = me
+	ck.me = me[len(me)-1:]
 	ck.server = server
 	return ck
 }
 
-//
 // call() sends an RPC to the rpcname handler on server srv
 // with arguments args, waits for the reply, and leaves the
 // reply in reply. the reply argument should be a pointer
@@ -35,7 +33,6 @@ func MakeClerk(me string, server string) *Clerk {
 //
 // please use call() to send all RPCs, in client.go and server.go.
 // please don't change this function.
-//
 func call(srv string, rpcname string,
 	args interface{}, reply interface{}) bool {
 	c, errx := rpc.Dial("unix", srv)

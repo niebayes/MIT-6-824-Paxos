@@ -78,3 +78,17 @@ type GetArgs struct {
 type GetReply struct {
 	View View
 }
+
+func max(a, b uint) uint {
+	if a >= b {
+		return a
+	}
+	return b
+}
+
+func min(a, b uint) uint {
+	if a <= b {
+		return a
+	}
+	return b
+}
