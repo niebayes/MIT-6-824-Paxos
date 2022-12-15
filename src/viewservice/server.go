@@ -68,19 +68,16 @@ func (vs *ViewServer) maybePromote() {
 	// the primary directly. If it could, then the previous data might get lost since
 	// there's no primary and no backup, and hence no one could transfer data to the idle server.
 	if vs.idleServer != "" && vs.latestView.Backup == "" && vs.latestView.Primary != "" {
-		maybePrintf("Promote S%v Idle -> Back", vs.idleServer)
 		vs.latestView.Backup = vs.idleServer
 		vs.idleServer = ""
 	}
 
 	if vs.latestView.Backup != "" && vs.latestView.Primary == "" {
-		maybePrintf("Promote S%v Back -> Prim", vs.latestView.Backup)
 		vs.latestView.Primary = vs.latestView.Backup
 		vs.latestView.Backup = ""
 
 		// promote the idle server (if there's one) to the backup.
 		if vs.idleServer != "" {
-			maybePrintf("Promote S%v Idle -> Back", vs.idleServer)
 			vs.latestView.Backup = vs.idleServer
 			vs.idleServer = ""
 		}
@@ -91,11 +88,7 @@ func (vs *ViewServer) maybeSwitchView() {
 	// switch to the latest view if the current view differs with the latest view
 	// and if the primary of the current view has acked.
 	if vs.currentView.Primary != vs.latestView.Primary || vs.currentView.Backup != vs.latestView.Backup {
-		curr := vs.currentView
 		vs.latestView.Viewnum = vs.currentView.Viewnum + 1
-		next := vs.latestView
-		maybePrintf("Update current view (%v, %v, %v) -> (%v, %v, %v)", curr.Viewnum, curr.Primary, curr.Backup,
-			next.Viewnum, next.Primary, next.Backup)
 		vs.currentView = vs.latestView
 		// reset.
 		vs.primaryAcked = false
@@ -110,8 +103,6 @@ func (vs *ViewServer) Ping(args *PingArgs, reply *PingReply) error {
 	server := args.Me
 	serverViewnum := args.Viewnum
 
-	maybePrintf("Ping (S%v, V%v)", server, serverViewnum)
-
 	// the first ping the view service ever received incurs a view change from view 0 to view 1,
 	// and the pinging server becomes the primary of view 1.
 	if vs.currentView.Viewnum == 0 {
@@ -123,7 +114,6 @@ func (vs *ViewServer) Ping(args *PingArgs, reply *PingReply) error {
 		vs.currentView = view
 		vs.latestView = view
 		reply.View = view
-		maybePrintf("Update current view and latest view to (%v, %v, %v)", view.Viewnum, view.Primary, view.Backup)
 		return nil
 	}
 
@@ -133,7 +123,6 @@ func (vs *ViewServer) Ping(args *PingArgs, reply *PingReply) error {
 	// condition could rule out this possibility.
 	if vs.currentView.Primary == server && vs.currentView.Viewnum == serverViewnum {
 		vs.primaryAcked = true
-		maybePrintf("Primary S%v acked in view %v", server, serverViewnum)
 	}
 
 	if serverViewnum == 0 {
@@ -152,7 +141,6 @@ func (vs *ViewServer) Ping(args *PingArgs, reply *PingReply) error {
 		// it could take part in the next round if it keeps pinging.
 		// this makes the code simpler.
 		vs.idleServer = server
-		maybePrintf("S%v becomes the idle server", server)
 	}
 
 	// reply the server with the current view.
@@ -160,9 +148,6 @@ func (vs *ViewServer) Ping(args *PingArgs, reply *PingReply) error {
 
 	// update last ping time for this server.
 	vs.lastPingTime[server] = time.Now()
-
-	maybePrintf("Reply S%v (%v, %v, %v)", server, reply.View.Viewnum, reply.View.Primary, reply.View.Backup)
-	maybePrintf("Latest view (%v, %v, %v)", vs.latestView.Viewnum, vs.latestView.Primary, vs.latestView.Backup)
 
 	// no error.
 	return nil
@@ -201,7 +186,6 @@ func (vs *ViewServer) tick() {
 	for _, server := range deadServers {
 		delete(vs.lastPingTime, server)
 		vs.maybeRemoveServer(server)
-		maybePrintf("S%v is dead", server)
 	}
 
 	if vs.primaryAcked {
