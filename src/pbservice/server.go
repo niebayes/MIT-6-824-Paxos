@@ -55,9 +55,11 @@ func (pb *PBServer) Get(args *GetArgs, reply *GetReply) error {
 
 	// forward the request to the backup (if there's one).
 	if pb.view.Backup != "" {
+		maybePrintf("S%v transfering state to S%v", pb.me, pb.view.Backup)
+
 		// do not make a gorouine to asyncly wait the RPC call.
 		// since async may break the linearizability.
-		if !call(pb.view.Backup, "Get", args, reply) {
+		if !call(pb.view.Backup, "PBServer.Get", args, reply) {
 			// failed to contact with the backup.
 			reply.Err = ErrInternal
 		}
@@ -89,6 +91,8 @@ func (pb *PBServer) Get(args *GetArgs, reply *GetReply) error {
 	// update the latest executed operation id for this client.
 	pb.lastExecOpId[args.Me] = args.OpId
 
+	maybePrintf("S%v executed PutAppend (%v, %v) from S%v", pb.me, args.Key, args.OpId, args.Me)
+
 	// no error.
 	return nil
 }
@@ -114,7 +118,7 @@ func (pb *PBServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error 
 	if pb.view.Backup != "" {
 		// do not make a gorouine to asyncly wait the RPC call.
 		// since async may break the linearizability.
-		if !call(pb.view.Backup, "PutAppend", args, reply) {
+		if !call(pb.view.Backup, "PBServer.PutAppend", args, reply) {
 			// failed to contact with the backup.
 			reply.Err = ErrInternal
 		}
@@ -135,6 +139,8 @@ func (pb *PBServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error 
 	// update the latest executed operation id for this client.
 	pb.lastExecOpId[args.Me] = args.OpId
 
+	maybePrintf("S%v executed PutAppend (%v, %v, %v) from S%v", pb.me, args.Key, args.Value, args.OpId, args.Me)
+
 	// no error.
 	return nil
 }
@@ -154,6 +160,8 @@ func (pb *PBServer) Transfer(args *TransferArgs, reply *TransferReply) error {
 	pb.db = args.Db
 	reply.Err = OK
 
+	maybePrintf("S%v installed state from S%v", pb.me, args.Me)
+
 	// no error.
 	return nil
 }
@@ -167,6 +175,7 @@ func (pb *PBServer) tick() {
 	pb.mu.Lock()
 	defer pb.mu.Unlock()
 
+	maybePrintf("S%v pings with view number %v", pb.me, pb.view.Viewnum)
 	view, err := pb.vs.Ping(pb.view.Viewnum)
 	if err != nil && (view.Viewnum != pb.view.Viewnum || view.Primary != pb.view.Primary || view.Backup != pb.view.Backup) {
 		if view.Primary == pb.me && view.Backup != "" {
@@ -180,6 +189,7 @@ func (pb *PBServer) tick() {
 		}
 		// update cached view.
 		pb.view = view
+		maybePrintf("S%v update view to (V%v, P%v, B%v)", pb.me, view.Viewnum, view.Primary, view.Backup)
 	}
 
 	if pb.pendingTransfer {
@@ -187,7 +197,7 @@ func (pb *PBServer) tick() {
 		if pb.view.Primary == pb.me && pb.view.Backup != "" {
 			args := &TransferArgs{Me: pb.me, Db: pb.db}
 			reply := &TransferReply{}
-			if call(pb.view.Backup, "Transfer", args, reply) && reply.Err == OK || reply.Err == ErrStale {
+			if call(pb.view.Backup, "PBServer.Transfer", args, reply) && reply.Err == OK || reply.Err == ErrStale {
 				pb.pendingTransfer = false
 			}
 		}
@@ -225,7 +235,7 @@ func StartServer(vshost string, me string) *PBServer {
 	pb.vs = viewservice.MakeClerk(me, vshost)
 	pb.db = make(map[string]string)
 	pb.lastExecOpId = make(map[int64]uint)
-	pb.view = viewservice.View{}
+	pb.view = viewservice.View{Viewnum: 0}
 	pb.pendingTransfer = false
 
 	rpcs := rpc.NewServer()

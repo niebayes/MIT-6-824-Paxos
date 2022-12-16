@@ -83,9 +83,10 @@ func (ck *Clerk) allocateOpId() uint {
 
 func (ck *Clerk) fetchNewView() {
 	for {
-		view, err := ck.vs.Ping(0)
+		view, err := ck.vs.Ping(ck.view.Viewnum)
 		if err == nil && view.Primary != "" {
 			ck.view = view
+			maybePrintf("C%v update view to (V%v, P%v, B%v)", ck.clerkId, ck.view.Viewnum, ck.view.Primary, ck.view.Backup)
 			return
 		}
 		time.Sleep(viewservice.PingInterval)
@@ -108,8 +109,10 @@ func (ck *Clerk) Get(key string) string {
 	args := &GetArgs{Me: ck.clerkId, OpId: opId, Key: key}
 	reply := &GetReply{}
 
+	maybePrintf("C%v sending Get(%v, %v)", key, opId)
+
 	for {
-		for !call(ck.view.Primary, "Get", args, reply) {
+		for !call(ck.view.Primary, "PBServer.Get", args, reply) {
 			// failed to contact with the primary, try to fetch a new view.
 			ck.fetchNewView()
 		}
@@ -138,8 +141,10 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 	args := &PutAppendArgs{Me: ck.clerkId, OpId: opId, Key: key, Value: value}
 	reply := &PutAppendReply{}
 
+	maybePrintf("C%v sending PutAppend(%v, %v, %v)", key, value, opId)
+
 	for {
-		for !call(ck.view.Primary, "PutAppend", args, reply) {
+		for !call(ck.view.Primary, "PBServer.PutAppend", args, reply) {
 			// failed to contact with the primary, try to fetch a new view.
 			ck.fetchNewView()
 		}
