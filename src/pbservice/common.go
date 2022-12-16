@@ -4,18 +4,19 @@ const (
 	OK             = "OK"
 	ErrNoKey       = "ErrNoKey"
 	ErrWrongServer = "ErrWrongServer"
+	ErrStale       = "ErrStale"
+	ErrInternal    = "ErrInternal"
+	ErrDuplicate   = "ErrDuplicate"
 )
 
 type Err string
 
 // Put or Append
 type PutAppendArgs struct {
+	Me    string
+	OpId  uint
 	Key   string
 	Value string
-	// You'll have to add definitions here.
-
-	// Field names must start with capital letters,
-	// otherwise RPC will break.
 }
 
 type PutAppendReply struct {
@@ -23,8 +24,9 @@ type PutAppendReply struct {
 }
 
 type GetArgs struct {
-	Key string
-	// You'll have to add definitions here.
+	Me   string
+	OpId uint
+	Key  string
 }
 
 type GetReply struct {
@@ -32,5 +34,12 @@ type GetReply struct {
 	Value string
 }
 
+type TransferArgs struct {
+	Me         string
+	// the previous or the current primary's complete database.
+	Db map[string]string
+}
 
-// Your RPC definitions here.
+type TransferReply struct {
+	Err Err
+}
