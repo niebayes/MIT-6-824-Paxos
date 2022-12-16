@@ -1,6 +1,7 @@
 package pbservice
 
 import (
+	"6.824/src/viewservice"
 	"fmt"
 	"log"
 	"math/rand"
@@ -11,7 +12,6 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
-	"viewservice"
 )
 
 const MAX_WAIT_TIME time.Duration = time.Second
@@ -29,7 +29,7 @@ type PBServer struct {
 	// key: client address, value: the id of the last processed operation from this client.
 	// this is used to ensure the at-most-once semantics, i.e. one operation could only be
 	// executed by the pb server at most once.
-	lastExecOpId map[string]uint
+	lastExecOpId map[int64]uint
 	// cached view.
 	view viewservice.View
 	// true if a pending transfer needs to be sent from this server (the primary) to the backup.
@@ -224,7 +224,7 @@ func StartServer(vshost string, me string) *PBServer {
 	pb.me = me
 	pb.vs = viewservice.MakeClerk(me, vshost)
 	pb.db = make(map[string]string)
-	pb.lastExecOpId = make(map[string]uint)
+	pb.lastExecOpId = make(map[int64]uint)
 	pb.view = viewservice.View{}
 	pb.pendingTransfer = false
 
