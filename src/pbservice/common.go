@@ -26,9 +26,9 @@ type PutAppendReply struct {
 }
 
 type GetArgs struct {
-	Me   int64
-	OpId uint
-	Key  string
+	Me      int64
+	OpId    uint
+	Key     string
 	Primary string
 }
 
@@ -42,6 +42,7 @@ type TransferArgs struct {
 	// the previous or the current primary's complete database.
 	Db           map[string]string
 	LastExecOpId map[int64]uint
+	CachedReply  map[int64]Reply
 }
 
 type TransferReply struct {

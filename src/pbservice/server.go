@@ -16,6 +16,11 @@ import (
 
 const MAX_WAIT_TIME time.Duration = time.Second
 
+type Reply struct {
+	GetReply       *GetReply
+	PutAppendReply *PutAppendReply
+}
+
 type PBServer struct {
 	mu         sync.Mutex
 	l          net.Listener
@@ -26,10 +31,12 @@ type PBServer struct {
 	vs *viewservice.Clerk
 	// key value database.
 	db map[string]string
-	// key: client address, value: the id of the last processed operation from this client.
+	// key: client id, value: the id of the last processed operation from this client.
 	// this is used to ensure the at-most-once semantics, i.e. one operation could only be
 	// executed by the pb server at most once.
 	lastExecOpId map[int64]uint
+	// key: client id, value: the last reply to the client. Could be PutAppendReply or GetReply.
+	cachedReply map[int64]Reply
 	// cached view.
 	view viewservice.View
 	// true if a pending transfer needs to be sent from this server (the primary) to the backup.
@@ -50,8 +57,29 @@ func (pb *PBServer) Get(args *GetArgs, reply *GetReply) error {
 	// reject the request if violates the at-most-once semantics.
 	opId, exist := pb.lastExecOpId[args.Me]
 	if exist && args.OpId <= opId {
-		reply.Err = ErrDuplicate
-		return nil
+		if args.OpId < opId {
+			// stale and non-cached.
+			reply.Err = ErrDuplicate
+			return nil
+		} else {
+			// stale but cached.
+			cachedReply, exist := pb.cachedReply[args.Me]
+			if !exist {
+				// shall exist.
+				reply.Err = ErrInternal
+				return nil
+			}
+			if cachedReply.GetReply != nil {
+				// return the cached reply.
+				reply.Err = cachedReply.GetReply.Err
+				reply.Value = cachedReply.GetReply.Value
+				return nil
+			} else {
+				// shall exist.
+				reply.Err = ErrInternal
+				return nil
+			}
+		}
 	}
 
 	// reject the request if being transfering state to the backup.
@@ -104,6 +132,9 @@ func (pb *PBServer) Get(args *GetArgs, reply *GetReply) error {
 	// update the latest executed operation id for this client.
 	pb.lastExecOpId[args.Me] = args.OpId
 
+	// cache the reply.
+	pb.cachedReply[args.Me] = Reply{GetReply: reply}
+
 	maybePrintf("S%v executed Get (%v, %v) from C%v", pb.me, args.Key, args.OpId, args.Me)
 
 	// no error.
@@ -124,8 +155,28 @@ func (pb *PBServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error 
 	// reject the request if violates the at-most-once semantics.
 	opId, exist := pb.lastExecOpId[args.Me]
 	if exist && args.OpId <= opId {
-		reply.Err = ErrDuplicate
-		return nil
+		if args.OpId < opId {
+			// stale and non-cached.
+			reply.Err = ErrDuplicate
+			return nil
+		} else {
+			// stale but cached.
+			cachedReply, exist := pb.cachedReply[args.Me]
+			if !exist {
+				// shall exist.
+				reply.Err = ErrInternal
+				return nil
+			}
+			if cachedReply.PutAppendReply != nil {
+				// return the cached reply.
+				reply.Err = cachedReply.PutAppendReply.Err
+				return nil
+			} else {
+				// shall exist.
+				reply.Err = ErrInternal
+				return nil
+			}
+		}
 	}
 
 	// reject the request if being transfering state to the backup.
@@ -170,6 +221,9 @@ func (pb *PBServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error 
 	// update the latest executed operation id for this client.
 	pb.lastExecOpId[args.Me] = args.OpId
 
+	// cache the reply.
+	pb.cachedReply[args.Me] = Reply{PutAppendReply: reply}
+
 	maybePrintf("S%v executed PutAppend (%v, %v, %v) from C%v", pb.me, args.Key, args.Value, args.OpId, args.Me)
 
 	// no error.
@@ -190,6 +244,7 @@ func (pb *PBServer) Transfer(args *TransferArgs, reply *TransferReply) error {
 	// install the transfered state.
 	pb.db = args.Db
 	pb.lastExecOpId = args.LastExecOpId
+	pb.cachedReply = args.CachedReply
 	reply.Err = OK
 
 	maybePrintf("S%v installed state from S%v", pb.me, args.Me)
@@ -224,7 +279,7 @@ func (pb *PBServer) tick() {
 	// the current primary needs to transfer db state to the backup (if there's one).
 	if pb.pendingTransfer && pb.view.Primary == pb.me && pb.view.Backup != "" {
 		maybePrintf("S%v transfering state to S%v", pb.me, pb.view.Backup)
-		args := &TransferArgs{Me: pb.me, Db: pb.db, LastExecOpId: pb.lastExecOpId}
+		args := &TransferArgs{Me: pb.me, Db: pb.db, LastExecOpId: pb.lastExecOpId, CachedReply: pb.cachedReply}
 		reply := &TransferReply{}
 		if call(pb.view.Backup, "PBServer.Transfer", args, reply) && (reply.Err == OK || reply.Err == ErrStale) {
 			pb.pendingTransfer = false
@@ -266,6 +321,7 @@ func StartServer(vshost string, me string) *PBServer {
 	pb.vs = viewservice.MakeClerk(me, vshost)
 	pb.db = make(map[string]string)
 	pb.lastExecOpId = make(map[int64]uint)
+	pb.cachedReply = make(map[int64]Reply)
 	pb.view = viewservice.View{Viewnum: 0}
 	pb.pendingTransfer = false
 
