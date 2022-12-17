@@ -66,7 +66,6 @@ func (pb *PBServer) Get(args *GetArgs, reply *GetReply) error {
 
 		// do not make a gorouine to asyncly wait the RPC call,
 		// since async may break the linearizability.
-		args.Primary = pb.me
 		if !call(pb.view.Backup, "PBServer.Get", args, reply) {
 			// failed to contact with the backup.
 			reply.Err = ErrInternal
@@ -141,7 +140,6 @@ func (pb *PBServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error 
 
 		// do not make a gorouine to asyncly wait the RPC call.
 		// since async may break the linearizability.
-		args.Primary = pb.me
 		if !call(pb.view.Backup, "PBServer.PutAppend", args, reply) {
 			// failed to contact with the backup.
 			reply.Err = ErrInternal
