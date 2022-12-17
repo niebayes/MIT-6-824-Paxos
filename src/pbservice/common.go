@@ -13,10 +13,12 @@ type Err string
 
 // Put or Append
 type PutAppendArgs struct {
-	Me    int64
-	OpId  uint
-	Key   string
-	Value string
+	Me      int64
+	OpId    uint
+	Key     string
+	Value   string
+	Op      string
+	Primary string
 }
 
 type PutAppendReply struct {
@@ -27,6 +29,7 @@ type GetArgs struct {
 	Me   int64
 	OpId uint
 	Key  string
+	Primary string
 }
 
 type GetReply struct {
@@ -35,9 +38,10 @@ type GetReply struct {
 }
 
 type TransferArgs struct {
-	Me         string
+	Me string
 	// the previous or the current primary's complete database.
-	Db map[string]string
+	Db           map[string]string
+	LastExecOpId map[int64]uint
 }
 
 type TransferReply struct {

@@ -40,8 +40,9 @@ func (pb *PBServer) Get(args *GetArgs, reply *GetReply) error {
 	pb.mu.Lock()
 	defer pb.mu.Unlock()
 
-	// reject the request if not the current primary.
-	if pb.view.Primary != pb.me {
+	// handle this request only if this server is the current primary,
+	// or this request is forwarded by the current primary.
+	if !(pb.view.Primary == pb.me || pb.view.Primary == args.Primary) {
 		reply.Err = ErrWrongServer
 		return nil
 	}
@@ -53,20 +54,30 @@ func (pb *PBServer) Get(args *GetArgs, reply *GetReply) error {
 		return nil
 	}
 
-	// forward the request to the backup (if there's one).
-	if pb.view.Backup != "" {
-		maybePrintf("S%v transfering state to S%v", pb.me, pb.view.Backup)
+	// reject the request if being transfering state to the backup.
+	if pb.pendingTransfer {
+		reply.Err = ErrInternal
+		return nil
+	}
 
-		// do not make a gorouine to asyncly wait the RPC call.
+	// forward the request to the backup.
+	if pb.view.Backup != "" && pb.view.Backup != pb.me {
+		maybePrintf("S%v forwarding Get (%v, %v) to S%v", pb.me, args.Key, args.OpId, pb.view.Backup)
+
+		// do not make a gorouine to asyncly wait the RPC call,
 		// since async may break the linearizability.
+		args.Primary = pb.me
 		if !call(pb.view.Backup, "PBServer.Get", args, reply) {
 			// failed to contact with the backup.
 			reply.Err = ErrInternal
 		}
 		if reply.Err != OK {
 			// failed to sync the request with the backup.
+			maybePrintf("Err = %v", reply.Err)
+			maybePrintf("S%v failed to sync Get (%v, %v) with S%v", pb.me, args.Key, args.OpId, pb.view.Backup)
 			return nil
 		}
+		maybePrintf("S%v successfully synced Get (%v, %v) with S%v", pb.me, args.Key, args.OpId, pb.view.Backup)
 	}
 
 	// the backup (if there's one) has successfully executed this request,
@@ -74,24 +85,27 @@ func (pb *PBServer) Get(args *GetArgs, reply *GetReply) error {
 	val, exist := pb.db[args.Key]
 	var primReply *GetReply = &GetReply{}
 	if exist {
+		primReply.Err = OK
 		primReply.Value = val
 	} else {
 		primReply.Err = ErrNoKey
 	}
-	if pb.view.Backup != "" && (primReply.Value != reply.Value || primReply.Err != reply.Err) {
+	if pb.view.Primary == pb.me && pb.view.Backup != "" && (primReply.Value != reply.Value || primReply.Err != reply.Err) {
 		// the primary and the backup returns different result, discard this request.
 		// FIXME: How to properly handle such inconsistency?
+		maybePrintf("inconsistency found: Primary (%v, %v) Backup(%v, %v)", primReply.Value, primReply.Err, reply.Value, reply.Err)
 		reply.Err = ErrInternal
 		return nil
 	}
 
 	// everything's ok.
 	reply.Err = OK
+	reply.Value = val
 
 	// update the latest executed operation id for this client.
 	pb.lastExecOpId[args.Me] = args.OpId
 
-	maybePrintf("S%v executed PutAppend (%v, %v) from S%v", pb.me, args.Key, args.OpId, args.Me)
+	maybePrintf("S%v executed Get (%v, %v) from C%v", pb.me, args.Key, args.OpId, args.Me)
 
 	// no error.
 	return nil
@@ -101,8 +115,9 @@ func (pb *PBServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error 
 	pb.mu.Lock()
 	defer pb.mu.Unlock()
 
-	// reject the request if not the current primary.
-	if pb.view.Primary != pb.me {
+	// handle this request only if this server is the current primary,
+	// or this request is forwarded by the current primary.
+	if !(pb.view.Primary == pb.me || pb.view.Primary == args.Primary) {
 		reply.Err = ErrWrongServer
 		return nil
 	}
@@ -114,24 +129,42 @@ func (pb *PBServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error 
 		return nil
 	}
 
-	// forward the request to the backup (if there's one).
-	if pb.view.Backup != "" {
+	// reject the request if being transfering state to the backup.
+	if pb.pendingTransfer {
+		reply.Err = ErrInternal
+		return nil
+	}
+
+	// forward the request to the backup.
+	if pb.view.Backup != "" && pb.view.Backup != pb.me {
+		maybePrintf("S%v forwarding PutAppend (%v, %v, %v) to S%v", pb.me, args.Key, args.Value, args.OpId, pb.view.Backup)
+
 		// do not make a gorouine to asyncly wait the RPC call.
 		// since async may break the linearizability.
+		args.Primary = pb.me
 		if !call(pb.view.Backup, "PBServer.PutAppend", args, reply) {
 			// failed to contact with the backup.
 			reply.Err = ErrInternal
 		}
 		if reply.Err != OK {
 			// failed to sync the request with the backup.
+			maybePrintf("Err = %v", reply.Err)
+			maybePrintf("S%v failed to sync PutAppend (%v, %v, %v) with S%v", pb.me, args.Key, args.Value, args.OpId, pb.view.Backup)
 			return nil
 		}
+		maybePrintf("S%v successfuly synced PutAppend (%v, %v, %v) with S%v", pb.me, args.Key, args.Value, args.OpId, pb.view.Backup)
 	}
 
 	// the backup (if there's one) has successfully executed this request,
 	// it's time for the primary to execute the operation.
-	val := pb.db[args.Key]
-	pb.db[args.Key] = val + args.Value
+	if args.Op == "Put" {
+		// put.
+		pb.db[args.Key] = args.Value
+	} else {
+		// append.
+		val := pb.db[args.Key]
+		pb.db[args.Key] = val + args.Value
+	}
 
 	// everything's ok.
 	reply.Err = OK
@@ -139,7 +172,7 @@ func (pb *PBServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error 
 	// update the latest executed operation id for this client.
 	pb.lastExecOpId[args.Me] = args.OpId
 
-	maybePrintf("S%v executed PutAppend (%v, %v, %v) from S%v", pb.me, args.Key, args.Value, args.OpId, args.Me)
+	maybePrintf("S%v executed PutAppend (%v, %v, %v) from C%v", pb.me, args.Key, args.Value, args.OpId, args.Me)
 
 	// no error.
 	return nil
@@ -158,6 +191,7 @@ func (pb *PBServer) Transfer(args *TransferArgs, reply *TransferReply) error {
 
 	// install the transfered state.
 	pb.db = args.Db
+	pb.lastExecOpId = args.LastExecOpId
 	reply.Err = OK
 
 	maybePrintf("S%v installed state from S%v", pb.me, args.Me)
@@ -177,11 +211,8 @@ func (pb *PBServer) tick() {
 
 	maybePrintf("S%v pings with view number %v", pb.me, pb.view.Viewnum)
 	view, err := pb.vs.Ping(pb.view.Viewnum)
-	if err != nil && (view.Viewnum != pb.view.Viewnum || view.Primary != pb.view.Primary || view.Backup != pb.view.Backup) {
+	if err == nil && (view.Viewnum != pb.view.Viewnum || view.Primary != pb.view.Primary || view.Backup != pb.view.Backup) {
 		if view.Primary == pb.me && view.Backup != "" {
-			if pb.view.Backup != pb.me {
-				log.Fatal("Error: promote idle server to primary")
-			}
 			// notify this server to send transfer to the backup periodically until the backup installed the state.
 			pb.pendingTransfer = true
 		} else {
@@ -189,17 +220,19 @@ func (pb *PBServer) tick() {
 		}
 		// update cached view.
 		pb.view = view
-		maybePrintf("S%v update view to (V%v, P%v, B%v)", pb.me, view.Viewnum, view.Primary, view.Backup)
+		maybePrintf("S%v update view to (V%v, P%v, B%v)", pb.me, pb.view.Viewnum, pb.view.Primary, pb.view.Backup)
 	}
 
-	if pb.pendingTransfer {
-		// the current primary needs to transfer db state to the backup (if there's one).
-		if pb.view.Primary == pb.me && pb.view.Backup != "" {
-			args := &TransferArgs{Me: pb.me, Db: pb.db}
-			reply := &TransferReply{}
-			if call(pb.view.Backup, "PBServer.Transfer", args, reply) && reply.Err == OK || reply.Err == ErrStale {
-				pb.pendingTransfer = false
-			}
+	// the current primary needs to transfer db state to the backup (if there's one).
+	if pb.pendingTransfer && pb.view.Primary == pb.me && pb.view.Backup != "" {
+		maybePrintf("S%v transfering state to S%v", pb.me, pb.view.Backup)
+		args := &TransferArgs{Me: pb.me, Db: pb.db, LastExecOpId: pb.lastExecOpId}
+		reply := &TransferReply{}
+		if call(pb.view.Backup, "PBServer.Transfer", args, reply) && (reply.Err == OK || reply.Err == ErrStale) {
+			pb.pendingTransfer = false
+			maybePrintf("S%v successefully synced with S%v", pb.me, pb.view.Backup)
+		} else {
+			maybePrintf("S%v failed to transfer state to S%v", pb.me, pb.view.Backup)
 		}
 	}
 }
