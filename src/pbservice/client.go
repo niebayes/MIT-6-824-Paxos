@@ -16,10 +16,10 @@ type Clerk struct {
 	// this is used by the pb server to detect duplicate requests
 	// and to ensure the at-most-once semantics.
 	nextOpId uint
-	// cached view.
-	// the clerk will try to fetch a new view from the view service when it cannot contact with
+	// cached primary address.
+	// the clerk will try to fetch the latest primary from the view service when it cannot contact with
 	// the current primary.
-	view viewservice.View
+	primary string
 	// the id of this clerk.
 	// this id is generated from nrand on init.
 	// we assume the clerk ids of different clerks will not collide.
@@ -38,7 +38,7 @@ func MakeClerk(vshost string, me string) *Clerk {
 	ck := new(Clerk)
 	ck.vs = viewservice.MakeClerk(me, vshost)
 	ck.nextOpId = 0
-	ck.view = viewservice.View{Viewnum: 0}
+	ck.primary = ""
 	ck.clerkId = nrand()
 	return ck
 }
@@ -81,28 +81,17 @@ func (ck *Clerk) allocateOpId() uint {
 	return opId
 }
 
-func (ck *Clerk) fetchNewView() {
-	for {
-		view, err := ck.vs.Ping(ck.view.Viewnum)
-		if err == nil && view.Primary != "" && (ck.view.Viewnum != view.Viewnum || ck.view.Primary != view.Primary || ck.view.Backup != view.Backup) {
-			ck.view = view
-			maybePrintf("C%v update view to (V%v, P%v, B%v)", ck.clerkId, ck.view.Viewnum, ck.view.Primary, ck.view.Backup)
-			return
-		}
-		time.Sleep(viewservice.PingInterval)
-	}
-}
-
 // fetch a key's value from the current primary;
 // if the key has never been set, return "".
 // Get() must keep trying until it either the
 // primary replies with the value or the primary
 // says the key doesn't exist (has never been Put().
 func (ck *Clerk) Get(key string) string {
-	// try to fetch a new view when there's no primary.
+	// try to fetch the latest primary when there's no primary.
 	// this could only happen when this clerk has just restarted or just joined the cluster.
-	if ck.view.Primary == "" {
-		ck.fetchNewView()
+	for ck.primary == "" {
+		ck.primary = ck.vs.Primary()
+		time.Sleep(viewservice.PingInterval)
 	}
 
 	opId := ck.allocateOpId()
@@ -112,10 +101,10 @@ func (ck *Clerk) Get(key string) string {
 	maybePrintf("C%v sending Get(%v, %v)", ck.clerkId, key, opId)
 
 	for {
-		for !call(ck.view.Primary, "PBServer.Get", args, reply) {
+		for !call(ck.primary, "PBServer.Get", args, reply) {
 			// failed to contact with the primary, try to fetch a new view.
-			maybePrintf("C%v failed to contact with primary S%v", ck.clerkId, ck.view.Primary)
-			ck.fetchNewView()
+			maybePrintf("C%v failed to contact with primary S%v", ck.clerkId, ck.primary)
+			ck.primary = ck.vs.Primary()
 		}
 		if reply.Err == ErrNoKey {
 			return ""
@@ -125,17 +114,18 @@ func (ck *Clerk) Get(key string) string {
 		}
 		// all other errors will not stop the operation.
 		if reply.Err == ErrWrongServer {
-			ck.fetchNewView()
+			ck.primary = ck.vs.Primary()
 		}
 	}
 }
 
 // send a Put or Append RPC
 func (ck *Clerk) PutAppend(key string, value string, op string) {
-	// try to fetch a new view when there's no primary.
+	// try to fetch the latest primary when there's no primary.
 	// this could only happen when this clerk has just restarted or just joined the cluster.
-	if ck.view.Primary == "" {
-		ck.fetchNewView()
+	for ck.primary == "" {
+		ck.primary = ck.vs.Primary()
+		time.Sleep(viewservice.PingInterval)
 	}
 
 	opId := ck.allocateOpId()
@@ -145,17 +135,17 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 	maybePrintf("C%v sending PutAppend(%v, %v, %v)", ck.clerkId, key, value, opId)
 
 	for {
-		for !call(ck.view.Primary, "PBServer.PutAppend", args, reply) {
+		for !call(ck.primary, "PBServer.PutAppend", args, reply) {
 			// failed to contact with the primary, try to fetch a new view.
-			maybePrintf("C%v failed to contact with primary S%v", ck.clerkId, ck.view.Primary)
-			ck.fetchNewView()
+			maybePrintf("C%v failed to contact with primary S%v", ck.clerkId, ck.primary)
+			ck.primary = ck.vs.Primary()
 		}
 		if reply.Err == OK {
 			break
 		}
 		// all other errors will not stop the operation.
 		if reply.Err == ErrWrongServer {
-			ck.fetchNewView()
+			ck.primary = ck.vs.Primary()
 		}
 	}
 }
