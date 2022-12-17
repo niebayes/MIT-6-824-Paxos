@@ -22,7 +22,8 @@ type PutAppendArgs struct {
 }
 
 type PutAppendReply struct {
-	Err Err
+	Err   Err
+	Value string
 }
 
 type GetArgs struct {

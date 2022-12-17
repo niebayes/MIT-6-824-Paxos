@@ -17,6 +17,8 @@ import (
 const MAX_WAIT_TIME time.Duration = time.Second
 
 type Reply struct {
+	ClerkId        int64
+	OpId           uint
 	GetReply       *GetReply
 	PutAppendReply *PutAppendReply
 }
@@ -69,13 +71,19 @@ func (pb *PBServer) Get(args *GetArgs, reply *GetReply) error {
 				reply.Err = ErrInternal
 				return nil
 			}
-			if cachedReply.GetReply != nil {
+			if cachedReply.ClerkId == args.Me && cachedReply.OpId == args.OpId && cachedReply.GetReply != nil {
 				// return the cached reply.
 				reply.Err = cachedReply.GetReply.Err
 				reply.Value = cachedReply.GetReply.Value
 				return nil
 			} else {
-				// shall exist.
+				// cache inconsistency, delete cache and try to do state transfering.
+				maybePrintf("cache inconsistency: Cached (clerkId: %v, opId: %v) Now (clerkId:%v, opId: %v)", cachedReply.ClerkId, cachedReply.OpId, args.Me, args.OpId)
+
+				delete(pb.cachedReply, args.Me)
+				if pb.view.Primary == pb.me && pb.view.Backup != "" {
+					pb.pendingTransfer = true
+				}
 				reply.Err = ErrInternal
 				return nil
 			}
@@ -119,9 +127,10 @@ func (pb *PBServer) Get(args *GetArgs, reply *GetReply) error {
 	}
 	if pb.view.Primary == pb.me && pb.view.Backup != "" && (primReply.Value != reply.Value || primReply.Err != reply.Err) {
 		// the primary and the backup returns different result, discard this request.
-		// FIXME: How to properly handle such inconsistency?
 		maybePrintf("inconsistency found: Primary (%v, %v) Backup(%v, %v)", primReply.Value, primReply.Err, reply.Value, reply.Err)
 		reply.Err = ErrInternal
+		// start state transfering to sync the primary and the backup.
+		pb.pendingTransfer = true
 		return nil
 	}
 
@@ -133,7 +142,7 @@ func (pb *PBServer) Get(args *GetArgs, reply *GetReply) error {
 	pb.lastExecOpId[args.Me] = args.OpId
 
 	// cache the reply.
-	pb.cachedReply[args.Me] = Reply{GetReply: reply}
+	pb.cachedReply[args.Me] = Reply{ClerkId: args.Me, OpId: args.OpId, GetReply: reply}
 
 	maybePrintf("S%v executed Get (%v, %v) from C%v", pb.me, args.Key, args.OpId, args.Me)
 
@@ -167,12 +176,19 @@ func (pb *PBServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error 
 				reply.Err = ErrInternal
 				return nil
 			}
-			if cachedReply.PutAppendReply != nil {
+			if cachedReply.ClerkId == args.Me && cachedReply.OpId == args.OpId && cachedReply.PutAppendReply != nil {
 				// return the cached reply.
 				reply.Err = cachedReply.PutAppendReply.Err
+				reply.Value = cachedReply.PutAppendReply.Value
 				return nil
 			} else {
-				// shall exist.
+				// cache inconsistency, delete cache and try to do state transfering.
+				maybePrintf("cache inconsistency: Cached (clerkId: %v, opId: %v) Now (clerkId:%v, opId: %v)", cachedReply.ClerkId, cachedReply.OpId, args.Me, args.OpId)
+
+				delete(pb.cachedReply, args.Me)
+				if pb.view.Primary == pb.me && pb.view.Backup != "" {
+					pb.pendingTransfer = true
+				}
 				reply.Err = ErrInternal
 				return nil
 			}
@@ -206,23 +222,37 @@ func (pb *PBServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error 
 
 	// the backup (if there's one) has successfully executed this request,
 	// it's time for the primary to execute the operation.
+	var primReply *PutAppendReply = &PutAppendReply{}
 	if args.Op == "Put" {
 		// put.
 		pb.db[args.Key] = args.Value
+		primReply.Value = pb.db[args.Key]
 	} else {
 		// append.
 		val := pb.db[args.Key]
 		pb.db[args.Key] = val + args.Value
+		primReply.Value = pb.db[args.Key]
+	}
+	primReply.Err = OK
+
+	if pb.view.Primary == pb.me && pb.view.Backup != "" && (primReply.Value != reply.Value || primReply.Err != reply.Err) {
+		// the primary and the backup returns different result, discard this request.
+		maybePrintf("primary backup disagreement: Primary (%v, %v) Backup(%v, %v)", primReply.Value, primReply.Err, reply.Value, reply.Err)
+		reply.Err = ErrInternal
+		// start state transfering to sync the primary and the backup.
+		pb.pendingTransfer = true
+		return nil
 	}
 
 	// everything's ok.
 	reply.Err = OK
+	reply.Value = primReply.Value
 
 	// update the latest executed operation id for this client.
 	pb.lastExecOpId[args.Me] = args.OpId
 
 	// cache the reply.
-	pb.cachedReply[args.Me] = Reply{PutAppendReply: reply}
+	pb.cachedReply[args.Me] = Reply{ClerkId: args.Me, OpId: args.OpId, PutAppendReply: reply}
 
 	maybePrintf("S%v executed PutAppend (%v, %v, %v) from C%v", pb.me, args.Key, args.Value, args.OpId, args.Me)
 
