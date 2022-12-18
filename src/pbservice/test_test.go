@@ -663,7 +663,7 @@ func TestConcurrentSameUnreliable(t *testing.T) {
 }
 
 // constant put/get while crashing and restarting servers
-func TestRepeatedCrash(t *testing.T) {
+func TestRepeatedCrash1(t *testing.T) {
 	runtime.GOMAXPROCS(4)
 
 	tag := "rc"

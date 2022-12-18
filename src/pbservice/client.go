@@ -11,22 +11,24 @@ import (
 )
 
 type Clerk struct {
+	// view service clerk through which this clerk communicates with the view service to
+	// fetch the latest primary in the pb server cluster.
 	vs *viewservice.Clerk
-	// the next operation id to allocate.
-	// this is used by the pb server to detect duplicate requests
-	// and to ensure the at-most-once semantics.
-	nextOpId uint
 	// cached primary address.
 	// the clerk will try to fetch the latest primary from the view service when it cannot contact with
 	// the current primary.
 	primary string
 	// the id of this clerk.
 	// this id is generated from nrand on init.
-	// we assume the clerk ids of different clerks will not collide.
+	// we assume the clerk ids of different clerks will not collide so that the pb servers could
+	// differentiate between clerks.
+	// this and the subsequent nextOpId are used to detect duplicate requests and
+	// to ensure the at-most-once semantics.
 	clerkId int64
+	// the next operation id to allocate.
+	nextOpId uint
 }
 
-// this may come in handy.
 func nrand() int64 {
 	max := big.NewInt(int64(1) << 62)
 	bigx, _ := rand.Int(rand.Reader, max)
@@ -34,12 +36,18 @@ func nrand() int64 {
 	return x
 }
 
+func (ck *Clerk) allocateOpId() uint {
+	opId := ck.nextOpId
+	ck.nextOpId += 1
+	return opId
+}
+
 func MakeClerk(vshost string, me string) *Clerk {
 	ck := new(Clerk)
 	ck.vs = viewservice.MakeClerk(me, vshost)
-	ck.nextOpId = 0
 	ck.primary = ""
 	ck.clerkId = nrand()
+	ck.nextOpId = 0
 	return ck
 }
 
@@ -75,12 +83,6 @@ func call(srv string, rpcname string,
 	return false
 }
 
-func (ck *Clerk) allocateOpId() uint {
-	opId := ck.nextOpId
-	ck.nextOpId += 1
-	return opId
-}
-
 // fetch a key's value from the current primary;
 // if the key has never been set, return "".
 // Get() must keep trying until it either the
@@ -101,8 +103,10 @@ func (ck *Clerk) Get(key string) string {
 	maybePrintf("C%v sending Get(%v, %v)", ck.clerkId, key, opId)
 
 	for {
+		// keep args' Primary field up-to-date.
+		args.Primary = ck.primary
 		for !call(ck.primary, "PBServer.Get", args, reply) {
-			// failed to contact with the primary, try to fetch a new view.
+			// failed to contact with the primary, try to fetch the latest primary.
 			maybePrintf("C%v failed to contact with primary S%v", ck.clerkId, ck.primary)
 			ck.primary = ck.vs.Primary()
 		}
@@ -135,8 +139,10 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 	maybePrintf("C%v sending PutAppend(%v, %v, %v)", ck.clerkId, key, value, opId)
 
 	for {
+		// keep args' Primary field up-to-date.
+		args.Primary = ck.primary
 		for !call(ck.primary, "PBServer.PutAppend", args, reply) {
-			// failed to contact with the primary, try to fetch a new view.
+			// failed to contact with the primary, try to fetch the latest primary.
 			maybePrintf("C%v failed to contact with primary S%v", ck.clerkId, ck.primary)
 			ck.primary = ck.vs.Primary()
 		}

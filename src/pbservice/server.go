@@ -14,15 +14,6 @@ import (
 	"time"
 )
 
-const MAX_WAIT_TIME time.Duration = time.Second
-
-type Reply struct {
-	ClerkId        int64
-	OpId           uint
-	GetReply       *GetReply
-	PutAppendReply *PutAppendReply
-}
-
 type PBServer struct {
 	mu         sync.Mutex
 	l          net.Listener
@@ -33,16 +24,28 @@ type PBServer struct {
 	vs *viewservice.Clerk
 	// key value database.
 	db map[string]string
-	// key: client id, value: the id of the last processed operation from this client.
+	// key: client id, value: the id of the last successfully executed operation from this client.
 	// this is used to ensure the at-most-once semantics, i.e. one operation could only be
-	// executed by the pb server at most once.
+	// executed by the pb server cluster at most once.
+	// the reason why only the last executed op id is cached is that:
+	// on the one hand, this lab assumes that there's at most one outstanding RPC,
+	// i.e. an RPC which is omitted but not received, and hence there's no RPC duplication and reordering.
+	// on the other hand, the failure scenarios are limited to server crash, server discard a request,
+	// server executed the request but discard the reply.
+	// for the first two scenarios, the client will repeat calling the server with the same op id since
+	// the server does not respond before timeout.
+	// for the last scenario, the client will also repeat calling the server with the same op id since
+	// the server has discarded the reply.
+	// if and only if the client receives a response with status OK or ErrNoKey (for Get), the client would
+	// proceeds to sending the next request with an op id just one higher.
+	// therefore, as for the single outstanding RPC request, its op id is limited to:
+	// (1) normal case && first two failure scenarios: one higher than the cached exec op id.
+	// (2) the last failure scenario: equal to the cached exec op id.
 	lastExecOpId map[int64]uint
-	// key: client id, value: the last reply to the client. Could be PutAppendReply or GetReply.
-	cachedReply map[int64]Reply
 	// cached view.
 	view viewservice.View
-	// true if a pending transfer needs to be sent from this server (the primary) to the backup.
-	pendingTransfer bool
+	// the address of the backup waiting for a copy of the key-value database of this server (the primary).
+	transferee string
 }
 
 func (pb *PBServer) Get(args *GetArgs, reply *GetReply) error {
@@ -51,8 +54,15 @@ func (pb *PBServer) Get(args *GetArgs, reply *GetReply) error {
 
 	// handle this request only if this server is the current primary,
 	// or this request is forwarded by the current primary.
-	if !(pb.view.Primary == pb.me || pb.view.Primary == args.Primary) {
+	if pb.view.Primary != pb.me && !(pb.view.Primary == args.Primary && pb.view.Backup == pb.me) {
 		reply.Err = ErrWrongServer
+		maybePrintf("S%v's view: (P:%v, B:%v)", pb.me, pb.view.Primary, pb.view.Backup)
+		return nil
+	}
+
+	// reject the request if being transfering state to the backup.
+	if pb.transferee != "" {
+		reply.Err = ErrInternal
 		return nil
 	}
 
@@ -60,39 +70,13 @@ func (pb *PBServer) Get(args *GetArgs, reply *GetReply) error {
 	opId, exist := pb.lastExecOpId[args.Me]
 	if exist && args.OpId <= opId {
 		if args.OpId < opId {
-			// stale and non-cached.
-			reply.Err = ErrDuplicate
-			return nil
-		} else {
-			// stale but cached.
-			cachedReply, exist := pb.cachedReply[args.Me]
-			if !exist {
-				// shall exist.
-				reply.Err = ErrInternal
-				return nil
-			}
-			if cachedReply.ClerkId == args.Me && cachedReply.OpId == args.OpId && cachedReply.GetReply != nil {
-				// return the cached reply.
-				reply.Err = cachedReply.GetReply.Err
-				reply.Value = cachedReply.GetReply.Value
-				return nil
-			} else {
-				// cache inconsistency, delete cache and try to do state transfering.
-				maybePrintf("cache inconsistency: Cached (clerkId: %v, opId: %v) Now (clerkId:%v, opId: %v)", cachedReply.ClerkId, cachedReply.OpId, args.Me, args.OpId)
-
-				delete(pb.cachedReply, args.Me)
-				if pb.view.Primary == pb.me && pb.view.Backup != "" {
-					pb.pendingTransfer = true
-				}
-				reply.Err = ErrInternal
-				return nil
-			}
+			log.Fatalf("S%v C%v Shall not happen: args op id = %v  cached op id = %v", pb.me, args.Me, args.OpId, opId)
 		}
-	}
-
-	// reject the request if being transfering state to the backup.
-	if pb.pendingTransfer {
-		reply.Err = ErrInternal
+		reply.Err = OK
+		reply.Value, exist = pb.db[args.Key]
+		if !exist {
+			reply.Err = ErrNoKey
+		}
 		return nil
 	}
 
@@ -108,8 +92,9 @@ func (pb *PBServer) Get(args *GetArgs, reply *GetReply) error {
 		}
 		if reply.Err != OK {
 			// failed to sync the request with the backup.
-			maybePrintf("Err = %v", reply.Err)
 			maybePrintf("S%v failed to sync Get (%v, %v) with S%v", pb.me, args.Key, args.OpId, pb.view.Backup)
+			maybePrintf("Err = %v", reply.Err)
+			maybePrintf("S%v's view: (P:%v, B:%v)", pb.me, pb.view.Primary, pb.view.Backup)
 			return nil
 		}
 		maybePrintf("S%v successfully synced Get (%v, %v) with S%v", pb.me, args.Key, args.OpId, pb.view.Backup)
@@ -130,7 +115,7 @@ func (pb *PBServer) Get(args *GetArgs, reply *GetReply) error {
 		maybePrintf("inconsistency found: Primary (%v, %v) Backup(%v, %v)", primReply.Value, primReply.Err, reply.Value, reply.Err)
 		reply.Err = ErrInternal
 		// start state transfering to sync the primary and the backup.
-		pb.pendingTransfer = true
+		// pb.transferee = pb.view.Backup
 		return nil
 	}
 
@@ -140,9 +125,7 @@ func (pb *PBServer) Get(args *GetArgs, reply *GetReply) error {
 
 	// update the latest executed operation id for this client.
 	pb.lastExecOpId[args.Me] = args.OpId
-
-	// cache the reply.
-	pb.cachedReply[args.Me] = Reply{ClerkId: args.Me, OpId: args.OpId, GetReply: reply}
+	maybePrintf("S%v update cached op id for C%v to %v", pb.me, args.Me, args.OpId)
 
 	maybePrintf("S%v executed Get (%v, %v) from C%v", pb.me, args.Key, args.OpId, args.Me)
 
@@ -156,8 +139,16 @@ func (pb *PBServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error 
 
 	// handle this request only if this server is the current primary,
 	// or this request is forwarded by the current primary.
-	if !(pb.view.Primary == pb.me || pb.view.Primary == args.Primary) {
+	if pb.view.Primary != pb.me && !(pb.view.Primary == args.Primary && pb.view.Backup == pb.me) {
 		reply.Err = ErrWrongServer
+		maybePrintf("S%v's view: (P:%v, B:%v)", pb.me, pb.view.Primary, pb.view.Backup)
+		return nil
+	}
+
+	// reject the request if being transfering state to the backup.
+	if pb.transferee != "" {
+		maybePrintf("S%v is transfering state")
+		reply.Err = ErrInternal
 		return nil
 	}
 
@@ -165,39 +156,9 @@ func (pb *PBServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error 
 	opId, exist := pb.lastExecOpId[args.Me]
 	if exist && args.OpId <= opId {
 		if args.OpId < opId {
-			// stale and non-cached.
-			reply.Err = ErrDuplicate
-			return nil
-		} else {
-			// stale but cached.
-			cachedReply, exist := pb.cachedReply[args.Me]
-			if !exist {
-				// shall exist.
-				reply.Err = ErrInternal
-				return nil
-			}
-			if cachedReply.ClerkId == args.Me && cachedReply.OpId == args.OpId && cachedReply.PutAppendReply != nil {
-				// return the cached reply.
-				reply.Err = cachedReply.PutAppendReply.Err
-				reply.Value = cachedReply.PutAppendReply.Value
-				return nil
-			} else {
-				// cache inconsistency, delete cache and try to do state transfering.
-				maybePrintf("cache inconsistency: Cached (clerkId: %v, opId: %v) Now (clerkId:%v, opId: %v)", cachedReply.ClerkId, cachedReply.OpId, args.Me, args.OpId)
-
-				delete(pb.cachedReply, args.Me)
-				if pb.view.Primary == pb.me && pb.view.Backup != "" {
-					pb.pendingTransfer = true
-				}
-				reply.Err = ErrInternal
-				return nil
-			}
+			log.Fatalf("S%v C%v Shall not happen: args op id = %v  cached op id = %v", pb.me, args.Me, args.OpId, opId)
 		}
-	}
-
-	// reject the request if being transfering state to the backup.
-	if pb.pendingTransfer {
-		reply.Err = ErrInternal
+		reply.Err = OK
 		return nil
 	}
 
@@ -240,7 +201,7 @@ func (pb *PBServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error 
 		maybePrintf("primary backup disagreement: Primary (%v, %v) Backup(%v, %v)", primReply.Value, primReply.Err, reply.Value, reply.Err)
 		reply.Err = ErrInternal
 		// start state transfering to sync the primary and the backup.
-		pb.pendingTransfer = true
+		// pb.transferee = pb.view.Backup
 		return nil
 	}
 
@@ -250,9 +211,7 @@ func (pb *PBServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error 
 
 	// update the latest executed operation id for this client.
 	pb.lastExecOpId[args.Me] = args.OpId
-
-	// cache the reply.
-	pb.cachedReply[args.Me] = Reply{ClerkId: args.Me, OpId: args.OpId, PutAppendReply: reply}
+	maybePrintf("S%v update cached op id for C%v to %v", pb.me, args.Me, args.OpId)
 
 	maybePrintf("S%v executed PutAppend (%v, %v, %v) from C%v", pb.me, args.Key, args.Value, args.OpId, args.Me)
 
@@ -274,7 +233,6 @@ func (pb *PBServer) Transfer(args *TransferArgs, reply *TransferReply) error {
 	// install the transfered state.
 	pb.db = args.Db
 	pb.lastExecOpId = args.LastExecOpId
-	pb.cachedReply = args.CachedReply
 	reply.Err = OK
 
 	maybePrintf("S%v installed state from S%v", pb.me, args.Me)
@@ -297,22 +255,22 @@ func (pb *PBServer) tick() {
 	if err == nil && (view.Viewnum != pb.view.Viewnum || view.Primary != pb.view.Primary || view.Backup != pb.view.Backup) {
 		if view.Primary == pb.me && view.Backup != "" {
 			// notify this server to send transfer to the backup periodically until the backup installed the state.
-			pb.pendingTransfer = true
+			pb.transferee = view.Backup
 		} else {
-			pb.pendingTransfer = false
+			pb.transferee = ""
 		}
 		// update cached view.
+		maybePrintf("S%v update view: (V%v, P%v, B%v) -> (V%v, P%v, B%v)", pb.me, pb.view.Viewnum, pb.view.Primary, pb.view.Backup, view.Viewnum, view.Primary, view.Backup)
 		pb.view = view
-		maybePrintf("S%v update view to (V%v, P%v, B%v)", pb.me, pb.view.Viewnum, pb.view.Primary, pb.view.Backup)
 	}
 
 	// the current primary needs to transfer db state to the backup (if there's one).
-	if pb.pendingTransfer && pb.view.Primary == pb.me && pb.view.Backup != "" {
+	if pb.transferee != "" && pb.view.Primary == pb.me && pb.view.Backup != "" {
 		maybePrintf("S%v transfering state to S%v", pb.me, pb.view.Backup)
-		args := &TransferArgs{Me: pb.me, Db: pb.db, LastExecOpId: pb.lastExecOpId, CachedReply: pb.cachedReply}
+		args := &TransferArgs{Me: pb.me, Db: pb.db, LastExecOpId: pb.lastExecOpId}
 		reply := &TransferReply{}
 		if call(pb.view.Backup, "PBServer.Transfer", args, reply) && (reply.Err == OK || reply.Err == ErrStale) {
-			pb.pendingTransfer = false
+			pb.transferee = ""
 			maybePrintf("S%v successefully synced with S%v", pb.me, pb.view.Backup)
 		} else {
 			maybePrintf("S%v failed to transfer state to S%v", pb.me, pb.view.Backup)
@@ -351,9 +309,8 @@ func StartServer(vshost string, me string) *PBServer {
 	pb.vs = viewservice.MakeClerk(me, vshost)
 	pb.db = make(map[string]string)
 	pb.lastExecOpId = make(map[int64]uint)
-	pb.cachedReply = make(map[int64]Reply)
 	pb.view = viewservice.View{Viewnum: 0}
-	pb.pendingTransfer = false
+	pb.transferee = ""
 
 	rpcs := rpc.NewServer()
 	rpcs.Register(pb)

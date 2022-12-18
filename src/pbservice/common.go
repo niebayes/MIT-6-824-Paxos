@@ -13,11 +13,11 @@ type Err string
 
 // Put or Append
 type PutAppendArgs struct {
-	Me      int64
+	Me      int64 // clerk id.
 	OpId    uint
 	Key     string
 	Value   string
-	Op      string
+	Op      string // "Put" or "Append".
 	Primary string
 }
 
@@ -27,7 +27,7 @@ type PutAppendReply struct {
 }
 
 type GetArgs struct {
-	Me      int64
+	Me      int64 // clerk id.
 	OpId    uint
 	Key     string
 	Primary string
@@ -39,11 +39,9 @@ type GetReply struct {
 }
 
 type TransferArgs struct {
-	Me string
-	// the previous or the current primary's complete database.
+	Me           string // pb server address.
 	Db           map[string]string
 	LastExecOpId map[int64]uint
-	CachedReply  map[int64]Reply
 }
 
 type TransferReply struct {

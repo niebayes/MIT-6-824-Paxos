@@ -1,0 +1,1040 @@
+Test: Concurrent Put()s to the same key; unreliable ...
+S/var/tmp/824-501/pb-55325-csu-1 pings with view number 0
+S/var/tmp/824-501/pb-55325-csu-2 pings with view number 0
+S/var/tmp/824-501/pb-55325-csu-2 update view to (V1, P/var/tmp/824-501/pb-55325-csu-1, B)
+S/var/tmp/824-501/pb-55325-csu-1 update view to (V1, P/var/tmp/824-501/pb-55325-csu-1, B)
+S/var/tmp/824-501/pb-55325-csu-2 pings with view number 1
+S/var/tmp/824-501/pb-55325-csu-1 pings with view number 1
+S/var/tmp/824-501/pb-55325-csu-1 update view to (V2, P/var/tmp/824-501/pb-55325-csu-1, B/var/tmp/824-501/pb-55325-csu-2)
+S/var/tmp/824-501/pb-55325-csu-1 transfering state to S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-1 failed to transfer state to S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-2 pings with view number 1
+S/var/tmp/824-501/pb-55325-csu-1 pings with view number 2
+S/var/tmp/824-501/pb-55325-csu-2 update view to (V2, P/var/tmp/824-501/pb-55325-csu-1, B/var/tmp/824-501/pb-55325-csu-2)
+S/var/tmp/824-501/pb-55325-csu-1 transfering state to S/var/tmp/824-501/pb-55325-csu-2
+unexpected EOF
+S/var/tmp/824-501/pb-55325-csu-1 failed to transfer state to S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-2 installed state from S/var/tmp/824-501/pb-55325-csu-1
+S/var/tmp/824-501/pb-55325-csu-1 pings with view number 2
+S/var/tmp/824-501/pb-55325-csu-2 pings with view number 2
+S/var/tmp/824-501/pb-55325-csu-1 transfering state to S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-2 installed state from S/var/tmp/824-501/pb-55325-csu-1
+S/var/tmp/824-501/pb-55325-csu-1 successefully synced with S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-2 pings with view number 2
+S/var/tmp/824-501/pb-55325-csu-1 pings with view number 2
+S/var/tmp/824-501/pb-55325-csu-1 pings with view number 2
+S/var/tmp/824-501/pb-55325-csu-2 pings with view number 2
+S/var/tmp/824-501/pb-55325-csu-2 pings with view number 2
+S/var/tmp/824-501/pb-55325-csu-1 pings with view number 2
+C2307349845443140698 sending PutAppend(0, x, 0)
+unexpected EOF
+C2307349845443140698 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+S/var/tmp/824-501/pb-55325-csu-1 forwarding PutAppend (0, x, 0) to S/var/tmp/824-501/pb-55325-csu-2
+unexpected EOF
+C2307349845443140698 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+S/var/tmp/824-501/pb-55325-csu-2 update cached op id for C2307349845443140698 to 0
+S/var/tmp/824-501/pb-55325-csu-2 executed PutAppend (0, x, 0) from C2307349845443140698
+S/var/tmp/824-501/pb-55325-csu-1 successfuly synced PutAppend (0, x, 0) with S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-1 update cached op id for C2307349845443140698 to 0
+S/var/tmp/824-501/pb-55325-csu-1 executed PutAppend (0, x, 0) from C2307349845443140698
+C2307349845443140698 sending PutAppend(1, x, 1)
+S/var/tmp/824-501/pb-55325-csu-1 forwarding PutAppend (1, x, 1) to S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-2 update cached op id for C2307349845443140698 to 1
+S/var/tmp/824-501/pb-55325-csu-2 executed PutAppend (1, x, 1) from C2307349845443140698
+S/var/tmp/824-501/pb-55325-csu-1 successfuly synced PutAppend (1, x, 1) with S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-1 update cached op id for C2307349845443140698 to 1
+S/var/tmp/824-501/pb-55325-csu-1 executed PutAppend (1, x, 1) from C2307349845443140698
+S/var/tmp/824-501/pb-55325-csu-1 pings with view number 2
+S/var/tmp/824-501/pb-55325-csu-2 pings with view number 2
+C4211661983794340467 sending PutAppend(1, 4057296322085974195, 0)
+C3575932264616691775 sending PutAppend(0, 7623341962322774995, 0)
+write unix ->/var/tmp/824-501/pb-55325-csu-1: write: broken pipe
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+C3407766221352240972 sending PutAppend(0, 2551026935937842659, 0)
+S/var/tmp/824-501/pb-55325-csu-1 forwarding PutAppend (0, 7623341962322774995, 0) to S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-2 update cached op id for C3575932264616691775 to 0
+S/var/tmp/824-501/pb-55325-csu-2 executed PutAppend (0, 7623341962322774995, 0) from C3575932264616691775
+S/var/tmp/824-501/pb-55325-csu-1 successfuly synced PutAppend (0, 7623341962322774995, 0) with S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-1 update cached op id for C3575932264616691775 to 0
+S/var/tmp/824-501/pb-55325-csu-1 executed PutAppend (0, 7623341962322774995, 0) from C3575932264616691775
+S/var/tmp/824-501/pb-55325-csu-1 forwarding PutAppend (0, 2551026935937842659, 0) to S/var/tmp/824-501/pb-55325-csu-2
+unexpected EOF
+C3575932264616691775 sending PutAppend(0, 4646594100569794505, 1)
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+Err = ErrInternal
+S/var/tmp/824-501/pb-55325-csu-1 failed to sync PutAppend (0, 2551026935937842659, 0) with S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-1 forwarding PutAppend (1, 4057296322085974195, 0) to S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-2 update cached op id for C4211661983794340467 to 0
+S/var/tmp/824-501/pb-55325-csu-2 executed PutAppend (1, 4057296322085974195, 0) from C4211661983794340467
+S/var/tmp/824-501/pb-55325-csu-1 successfuly synced PutAppend (1, 4057296322085974195, 0) with S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-1 update cached op id for C4211661983794340467 to 0
+S/var/tmp/824-501/pb-55325-csu-1 executed PutAppend (1, 4057296322085974195, 0) from C4211661983794340467
+S/var/tmp/824-501/pb-55325-csu-1 forwarding PutAppend (0, 4646594100569794505, 1) to S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-2 update cached op id for C3575932264616691775 to 1
+S/var/tmp/824-501/pb-55325-csu-2 executed PutAppend (0, 4646594100569794505, 1) from C3575932264616691775
+S/var/tmp/824-501/pb-55325-csu-1 successfuly synced PutAppend (0, 4646594100569794505, 1) with S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-1 update cached op id for C3575932264616691775 to 1
+S/var/tmp/824-501/pb-55325-csu-1 executed PutAppend (0, 4646594100569794505, 1) from C3575932264616691775
+S/var/tmp/824-501/pb-55325-csu-1 forwarding PutAppend (0, 2551026935937842659, 0) to S/var/tmp/824-501/pb-55325-csu-2
+C4211661983794340467 sending PutAppend(0, 7863926488176654828, 1)
+C3575932264616691775 sending PutAppend(1, 2660045150799528703, 2)
+S/var/tmp/824-501/pb-55325-csu-2 update cached op id for C3407766221352240972 to 0
+S/var/tmp/824-501/pb-55325-csu-2 executed PutAppend (0, 2551026935937842659, 0) from C3407766221352240972
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+S/var/tmp/824-501/pb-55325-csu-1 successfuly synced PutAppend (0, 2551026935937842659, 0) with S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-1 update cached op id for C3407766221352240972 to 0
+S/var/tmp/824-501/pb-55325-csu-1 executed PutAppend (0, 2551026935937842659, 0) from C3407766221352240972
+S/var/tmp/824-501/pb-55325-csu-1 pings with view number 2
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+C3407766221352240972 sending PutAppend(1, 1709511576925525574, 1)
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+S/var/tmp/824-501/pb-55325-csu-1 forwarding PutAppend (0, 7863926488176654828, 1) to S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-2 update cached op id for C4211661983794340467 to 1
+S/var/tmp/824-501/pb-55325-csu-2 executed PutAppend (0, 7863926488176654828, 1) from C4211661983794340467
+S/var/tmp/824-501/pb-55325-csu-1 successfuly synced PutAppend (0, 7863926488176654828, 1) with S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-1 update cached op id for C4211661983794340467 to 1
+S/var/tmp/824-501/pb-55325-csu-1 executed PutAppend (0, 7863926488176654828, 1) from C4211661983794340467
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+S/var/tmp/824-501/pb-55325-csu-1 forwarding PutAppend (1, 1709511576925525574, 1) to S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-2 pings with view number 2
+S/var/tmp/824-501/pb-55325-csu-2 update cached op id for C3407766221352240972 to 1
+S/var/tmp/824-501/pb-55325-csu-2 executed PutAppend (1, 1709511576925525574, 1) from C3407766221352240972
+S/var/tmp/824-501/pb-55325-csu-1 successfuly synced PutAppend (1, 1709511576925525574, 1) with S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-1 update cached op id for C3407766221352240972 to 1
+S/var/tmp/824-501/pb-55325-csu-1 executed PutAppend (1, 1709511576925525574, 1) from C3407766221352240972
+S/var/tmp/824-501/pb-55325-csu-1 forwarding PutAppend (1, 2660045150799528703, 2) to S/var/tmp/824-501/pb-55325-csu-2
+C3407766221352240972 sending PutAppend(0, 5633449850639385347, 2)
+S/var/tmp/824-501/pb-55325-csu-2 update cached op id for C3575932264616691775 to 2
+S/var/tmp/824-501/pb-55325-csu-2 executed PutAppend (1, 2660045150799528703, 2) from C3575932264616691775
+S/var/tmp/824-501/pb-55325-csu-1 successfuly synced PutAppend (1, 2660045150799528703, 2) with S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-1 update cached op id for C3575932264616691775 to 2
+S/var/tmp/824-501/pb-55325-csu-1 executed PutAppend (1, 2660045150799528703, 2) from C3575932264616691775
+S/var/tmp/824-501/pb-55325-csu-1 forwarding PutAppend (0, 5633449850639385347, 2) to S/var/tmp/824-501/pb-55325-csu-2
+C3575932264616691775 sending PutAppend(1, 5462451620831939528, 3)
+C4211661983794340467 sending PutAppend(0, 440917958518845176, 2)
+S/var/tmp/824-501/pb-55325-csu-2 update cached op id for C3407766221352240972 to 2
+S/var/tmp/824-501/pb-55325-csu-2 executed PutAppend (0, 5633449850639385347, 2) from C3407766221352240972
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+S/var/tmp/824-501/pb-55325-csu-1 successfuly synced PutAppend (0, 5633449850639385347, 2) with S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-1 update cached op id for C3407766221352240972 to 2
+S/var/tmp/824-501/pb-55325-csu-1 executed PutAppend (0, 5633449850639385347, 2) from C3407766221352240972
+S/var/tmp/824-501/pb-55325-csu-1 forwarding PutAppend (1, 5462451620831939528, 3) to S/var/tmp/824-501/pb-55325-csu-2
+C3407766221352240972 sending PutAppend(1, 5922991825859699840, 3)
+S/var/tmp/824-501/pb-55325-csu-2 update cached op id for C3575932264616691775 to 3
+S/var/tmp/824-501/pb-55325-csu-2 executed PutAppend (1, 5462451620831939528, 3) from C3575932264616691775
+S/var/tmp/824-501/pb-55325-csu-1 successfuly synced PutAppend (1, 5462451620831939528, 3) with S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-1 update cached op id for C3575932264616691775 to 3
+S/var/tmp/824-501/pb-55325-csu-1 executed PutAppend (1, 5462451620831939528, 3) from C3575932264616691775
+S/var/tmp/824-501/pb-55325-csu-1 forwarding PutAppend (1, 5922991825859699840, 3) to S/var/tmp/824-501/pb-55325-csu-2
+C3575932264616691775 sending PutAppend(0, 122413060979835490, 4)
+S/var/tmp/824-501/pb-55325-csu-2 update cached op id for C3407766221352240972 to 3
+S/var/tmp/824-501/pb-55325-csu-2 executed PutAppend (1, 5922991825859699840, 3) from C3407766221352240972
+S/var/tmp/824-501/pb-55325-csu-1 successfuly synced PutAppend (1, 5922991825859699840, 3) with S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-1 update cached op id for C3407766221352240972 to 3
+S/var/tmp/824-501/pb-55325-csu-1 executed PutAppend (1, 5922991825859699840, 3) from C3407766221352240972
+S/var/tmp/824-501/pb-55325-csu-1 forwarding PutAppend (0, 440917958518845176, 2) to S/var/tmp/824-501/pb-55325-csu-2
+C3407766221352240972 sending PutAppend(0, 2101771710149598145, 4)
+S/var/tmp/824-501/pb-55325-csu-2 update cached op id for C4211661983794340467 to 2
+S/var/tmp/824-501/pb-55325-csu-2 executed PutAppend (0, 440917958518845176, 2) from C4211661983794340467
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+S/var/tmp/824-501/pb-55325-csu-1 successfuly synced PutAppend (0, 440917958518845176, 2) with S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-1 update cached op id for C4211661983794340467 to 2
+S/var/tmp/824-501/pb-55325-csu-1 executed PutAppend (0, 440917958518845176, 2) from C4211661983794340467
+S/var/tmp/824-501/pb-55325-csu-1 forwarding PutAppend (0, 122413060979835490, 4) to S/var/tmp/824-501/pb-55325-csu-2
+C4211661983794340467 sending PutAppend(1, 2681842961793809261, 3)
+unexpected EOF
+Err = ErrInternal
+S/var/tmp/824-501/pb-55325-csu-1 failed to sync PutAppend (0, 122413060979835490, 4) with S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-1 forwarding PutAppend (0, 2101771710149598145, 4) to S/var/tmp/824-501/pb-55325-csu-2
+unexpected EOF
+Err = ErrInternal
+S/var/tmp/824-501/pb-55325-csu-1 failed to sync PutAppend (0, 2101771710149598145, 4) with S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-1 forwarding PutAppend (0, 2101771710149598145, 4) to S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-2 update cached op id for C3407766221352240972 to 4
+S/var/tmp/824-501/pb-55325-csu-2 executed PutAppend (0, 2101771710149598145, 4) from C3407766221352240972
+unexpected EOF
+unexpected EOF
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+Err = ErrInternal
+S/var/tmp/824-501/pb-55325-csu-1 failed to sync PutAppend (0, 2101771710149598145, 4) with S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-1 forwarding PutAppend (1, 2681842961793809261, 3) to S/var/tmp/824-501/pb-55325-csu-2
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+S/var/tmp/824-501/pb-55325-csu-2 update cached op id for C4211661983794340467 to 3
+S/var/tmp/824-501/pb-55325-csu-2 executed PutAppend (1, 2681842961793809261, 3) from C4211661983794340467
+S/var/tmp/824-501/pb-55325-csu-1 successfuly synced PutAppend (1, 2681842961793809261, 3) with S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-1 update cached op id for C4211661983794340467 to 3
+S/var/tmp/824-501/pb-55325-csu-1 executed PutAppend (1, 2681842961793809261, 3) from C4211661983794340467
+S/var/tmp/824-501/pb-55325-csu-1 forwarding PutAppend (0, 122413060979835490, 4) to S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-2 update cached op id for C3575932264616691775 to 4
+S/var/tmp/824-501/pb-55325-csu-2 executed PutAppend (0, 122413060979835490, 4) from C3575932264616691775
+S/var/tmp/824-501/pb-55325-csu-1 successfuly synced PutAppend (0, 122413060979835490, 4) with S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-1 update cached op id for C3575932264616691775 to 4
+S/var/tmp/824-501/pb-55325-csu-1 executed PutAppend (0, 122413060979835490, 4) from C3575932264616691775
+S/var/tmp/824-501/pb-55325-csu-1 forwarding PutAppend (0, 2101771710149598145, 4) to S/var/tmp/824-501/pb-55325-csu-2
+C3575932264616691775 sending PutAppend(1, 2438534187163397990, 5)
+unexpected EOF
+Err = ErrInternal
+S/var/tmp/824-501/pb-55325-csu-1 failed to sync PutAppend (0, 2101771710149598145, 4) with S/var/tmp/824-501/pb-55325-csu-2
+C4211661983794340467 sending PutAppend(1, 6339405212702409259, 4)
+S/var/tmp/824-501/pb-55325-csu-1 forwarding PutAppend (1, 2438534187163397990, 5) to S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-2 update cached op id for C3575932264616691775 to 5
+S/var/tmp/824-501/pb-55325-csu-2 executed PutAppend (1, 2438534187163397990, 5) from C3575932264616691775
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+S/var/tmp/824-501/pb-55325-csu-1 successfuly synced PutAppend (1, 2438534187163397990, 5) with S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-1 update cached op id for C3575932264616691775 to 5
+S/var/tmp/824-501/pb-55325-csu-1 executed PutAppend (1, 2438534187163397990, 5) from C3575932264616691775
+S/var/tmp/824-501/pb-55325-csu-1 forwarding PutAppend (1, 6339405212702409259, 4) to S/var/tmp/824-501/pb-55325-csu-2
+C3575932264616691775 sending PutAppend(1, 701283077636480315, 6)
+S/var/tmp/824-501/pb-55325-csu-2 update cached op id for C4211661983794340467 to 4
+S/var/tmp/824-501/pb-55325-csu-2 executed PutAppend (1, 6339405212702409259, 4) from C4211661983794340467
+S/var/tmp/824-501/pb-55325-csu-1 successfuly synced PutAppend (1, 6339405212702409259, 4) with S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-1 update cached op id for C4211661983794340467 to 4
+S/var/tmp/824-501/pb-55325-csu-1 executed PutAppend (1, 6339405212702409259, 4) from C4211661983794340467
+S/var/tmp/824-501/pb-55325-csu-1 forwarding PutAppend (0, 2101771710149598145, 4) to S/var/tmp/824-501/pb-55325-csu-2
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+C4211661983794340467 sending PutAppend(1, 3206263174315749149, 5)
+unexpected EOF
+Err = ErrInternal
+S/var/tmp/824-501/pb-55325-csu-1 failed to sync PutAppend (0, 2101771710149598145, 4) with S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-1 forwarding PutAppend (0, 2101771710149598145, 4) to S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-1 successfuly synced PutAppend (0, 2101771710149598145, 4) with S/var/tmp/824-501/pb-55325-csu-2
+primary backup disagreement: Primary (2101771710149598145, OK) Backup(, OK)
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+write unix ->/var/tmp/824-501/pb-55325-csu-1: write: broken pipe
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+write unix ->/var/tmp/824-501/pb-55325-csu-1: write: broken pipe
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+write unix ->/var/tmp/824-501/pb-55325-csu-1: write: broken pipe
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+write unix ->/var/tmp/824-501/pb-55325-csu-1: write: broken pipe
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+write unix ->/var/tmp/824-501/pb-55325-csu-1: write: broken pipe
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+write unix ->/var/tmp/824-501/pb-55325-csu-1: write: broken pipe
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+write unix ->/var/tmp/824-501/pb-55325-csu-1: write: broken pipe
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+write unix ->/var/tmp/824-501/pb-55325-csu-1: write: broken pipe
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+write unix ->/var/tmp/824-501/pb-55325-csu-1: write: broken pipe
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+write unix ->/var/tmp/824-501/pb-55325-csu-1: write: broken pipe
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+write unix ->/var/tmp/824-501/pb-55325-csu-1: write: broken pipe
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+write unix ->/var/tmp/824-501/pb-55325-csu-1: write: socket is not connected
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+write unix ->/var/tmp/824-501/pb-55325-csu-1: write: broken pipe
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+write unix ->/var/tmp/824-501/pb-55325-csu-1: write: broken pipe
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+write unix ->/var/tmp/824-501/pb-55325-csu-1: write: broken pipe
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+write unix ->/var/tmp/824-501/pb-55325-csu-1: write: broken pipe
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+write unix ->/var/tmp/824-501/pb-55325-csu-1: write: broken pipe
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+write unix ->/var/tmp/824-501/pb-55325-csu-1: write: broken pipe
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+write unix ->/var/tmp/824-501/pb-55325-csu-1: write: broken pipe
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+write unix ->/var/tmp/824-501/pb-55325-csu-1: write: broken pipe
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+write unix ->/var/tmp/824-501/pb-55325-csu-1: write: broken pipe
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3407766221352240972 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+S/var/tmp/824-501/pb-55325-csu-2 pings with view number 2
+S/var/tmp/824-501/pb-55325-csu-1 pings with view number 2
+S/var/tmp/824-501/pb-55325-csu-1 transfering state to S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-2 installed state from S/var/tmp/824-501/pb-55325-csu-1
+S/var/tmp/824-501/pb-55325-csu-1 successefully synced with S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-1 forwarding PutAppend (1, 701283077636480315, 6) to S/var/tmp/824-501/pb-55325-csu-2
+unexpected EOF
+Err = ErrInternal
+S/var/tmp/824-501/pb-55325-csu-1 failed to sync PutAppend (1, 701283077636480315, 6) with S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-1 forwarding PutAppend (1, 3206263174315749149, 5) to S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-2 update cached op id for C4211661983794340467 to 5
+S/var/tmp/824-501/pb-55325-csu-2 executed PutAppend (1, 3206263174315749149, 5) from C4211661983794340467
+S/var/tmp/824-501/pb-55325-csu-1 successfuly synced PutAppend (1, 3206263174315749149, 5) with S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-1 update cached op id for C4211661983794340467 to 5
+S/var/tmp/824-501/pb-55325-csu-1 executed PutAppend (1, 3206263174315749149, 5) from C4211661983794340467
+S/var/tmp/824-501/pb-55325-csu-1 forwarding PutAppend (0, 2101771710149598145, 4) to S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-2 update cached op id for C3407766221352240972 to 4
+S/var/tmp/824-501/pb-55325-csu-2 executed PutAppend (0, 2101771710149598145, 4) from C3407766221352240972
+C4211661983794340467 sending PutAppend(1, 9056973076916460357, 6)
+S/var/tmp/824-501/pb-55325-csu-1 successfuly synced PutAppend (0, 2101771710149598145, 4) with S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-1 update cached op id for C3407766221352240972 to 4
+S/var/tmp/824-501/pb-55325-csu-1 executed PutAppend (0, 2101771710149598145, 4) from C3407766221352240972
+S/var/tmp/824-501/pb-55325-csu-1 forwarding PutAppend (1, 701283077636480315, 6) to S/var/tmp/824-501/pb-55325-csu-2
+unexpected EOF
+Err = ErrInternal
+S/var/tmp/824-501/pb-55325-csu-1 failed to sync PutAppend (1, 701283077636480315, 6) with S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-1 forwarding PutAppend (1, 9056973076916460357, 6) to S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-2 update cached op id for C4211661983794340467 to 6
+S/var/tmp/824-501/pb-55325-csu-2 executed PutAppend (1, 9056973076916460357, 6) from C4211661983794340467
+S/var/tmp/824-501/pb-55325-csu-1 successfuly synced PutAppend (1, 9056973076916460357, 6) with S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-1 update cached op id for C4211661983794340467 to 6
+S/var/tmp/824-501/pb-55325-csu-1 executed PutAppend (1, 9056973076916460357, 6) from C4211661983794340467
+S/var/tmp/824-501/pb-55325-csu-1 forwarding PutAppend (1, 701283077636480315, 6) to S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-2 update cached op id for C3575932264616691775 to 6
+S/var/tmp/824-501/pb-55325-csu-2 executed PutAppend (1, 701283077636480315, 6) from C3575932264616691775
+C4211661983794340467 sending PutAppend(0, 3157118896741573467, 7)
+S/var/tmp/824-501/pb-55325-csu-1 successfuly synced PutAppend (1, 701283077636480315, 6) with S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-1 update cached op id for C3575932264616691775 to 6
+S/var/tmp/824-501/pb-55325-csu-1 executed PutAppend (1, 701283077636480315, 6) from C3575932264616691775
+C3575932264616691775 sending PutAppend(1, 7235719348789951815, 7)
+unexpected EOF
+C4211661983794340467 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+S/var/tmp/824-501/pb-55325-csu-1 forwarding PutAppend (0, 3157118896741573467, 7) to S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-2 update cached op id for C4211661983794340467 to 7
+S/var/tmp/824-501/pb-55325-csu-2 executed PutAppend (0, 3157118896741573467, 7) from C4211661983794340467
+S/var/tmp/824-501/pb-55325-csu-1 successfuly synced PutAppend (0, 3157118896741573467, 7) with S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-1 update cached op id for C4211661983794340467 to 7
+S/var/tmp/824-501/pb-55325-csu-1 executed PutAppend (0, 3157118896741573467, 7) from C4211661983794340467
+unexpected EOF
+C3575932264616691775 failed to contact with primary S/var/tmp/824-501/pb-55325-csu-1
+C4211661983794340467 sending PutAppend(0, 7794722359572827370, 8)
+S/var/tmp/824-501/pb-55325-csu-1 forwarding PutAppend (0, 7794722359572827370, 8) to S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-2 update cached op id for C4211661983794340467 to 8
+S/var/tmp/824-501/pb-55325-csu-2 executed PutAppend (0, 7794722359572827370, 8) from C4211661983794340467
+S/var/tmp/824-501/pb-55325-csu-1 successfuly synced PutAppend (0, 7794722359572827370, 8) with S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-1 update cached op id for C4211661983794340467 to 8
+S/var/tmp/824-501/pb-55325-csu-1 executed PutAppend (0, 7794722359572827370, 8) from C4211661983794340467
+S/var/tmp/824-501/pb-55325-csu-1 forwarding PutAppend (1, 7235719348789951815, 7) to S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-2 update cached op id for C3575932264616691775 to 7
+S/var/tmp/824-501/pb-55325-csu-2 executed PutAppend (1, 7235719348789951815, 7) from C3575932264616691775
+C4211661983794340467 sending PutAppend(0, 4916774581793092749, 9)
+S/var/tmp/824-501/pb-55325-csu-1 successfuly synced PutAppend (1, 7235719348789951815, 7) with S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-1 update cached op id for C3575932264616691775 to 7
+S/var/tmp/824-501/pb-55325-csu-1 executed PutAppend (1, 7235719348789951815, 7) from C3575932264616691775
+S/var/tmp/824-501/pb-55325-csu-1 forwarding PutAppend (0, 4916774581793092749, 9) to S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-2 update cached op id for C4211661983794340467 to 9
+S/var/tmp/824-501/pb-55325-csu-2 executed PutAppend (0, 4916774581793092749, 9) from C4211661983794340467
+C3575932264616691775 sending PutAppend(0, 5490148505102956261, 8)
+S/var/tmp/824-501/pb-55325-csu-1 successfuly synced PutAppend (0, 4916774581793092749, 9) with S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-1 update cached op id for C4211661983794340467 to 9
+S/var/tmp/824-501/pb-55325-csu-1 executed PutAppend (0, 4916774581793092749, 9) from C4211661983794340467
+C4211661983794340467 sending PutAppend(0, 6444661545830683188, 10)
+S/var/tmp/824-501/pb-55325-csu-1 forwarding PutAppend (0, 5490148505102956261, 8) to S/var/tmp/824-501/pb-55325-csu-2
+unexpected EOF
+Err = ErrInternal
+S/var/tmp/824-501/pb-55325-csu-1 failed to sync PutAppend (0, 5490148505102956261, 8) with S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-1 forwarding PutAppend (0, 6444661545830683188, 10) to S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-2 update cached op id for C3575932264616691775 to 8
+S/var/tmp/824-501/pb-55325-csu-2 executed PutAppend (0, 5490148505102956261, 8) from C3575932264616691775
+S/var/tmp/824-501/pb-55325-csu-2 update cached op id for C4211661983794340467 to 10
+S/var/tmp/824-501/pb-55325-csu-2 executed PutAppend (0, 6444661545830683188, 10) from C4211661983794340467
+S/var/tmp/824-501/pb-55325-csu-1 successfuly synced PutAppend (0, 6444661545830683188, 10) with S/var/tmp/824-501/pb-55325-csu-2
+S/var/tmp/824-501/pb-55325-csu-1 update cached op id for C4211661983794340467 to 10
+S/var/tmp/824-501/pb-55325-csu-1 executed PutAppend (0, 6444661545830683188, 10) from C4211661983794340467
+S/var/tmp/824-501/pb-55325-csu-1 forwarding PutAppend (0, 5490148505102956261, 8) to S/var/tmp/824-501/pb-55325-csu-2
+C4211661983794340467 sending PutAppend(0, 5608796965324994293, 11)
+S/var/tmp/824-501/pb-55325-csu-1 successfuly synced PutAppend (0, 5490148505102956261, 8) with S/var/tmp/824-501/pb-55325-csu-2
+primary backup disagreement: Primary (5490148505102956261, OK) Backup(, OK)
+2022/12/18 12:50:06 S/var/tmp/824-501/pb-55325-csu-2 C3575932264616691775 Shall not happen: args op id = 6  cached op id = 8
+exit status 1
+FAIL	6.824/src/pbservice	3.032s

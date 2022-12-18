@@ -1,0 +1,54 @@
+Test: Concurrent Put()s to the same key; unreliable ...
+S/var/tmp/824-501/pb-55322-csu-1 pings with view number 0
+S/var/tmp/824-501/pb-55322-csu-2 pings with view number 0
+S/var/tmp/824-501/pb-55322-csu-1 update view to (V1, P/var/tmp/824-501/pb-55322-csu-1, B)
+S/var/tmp/824-501/pb-55322-csu-2 update view to (V1, P/var/tmp/824-501/pb-55322-csu-1, B)
+S/var/tmp/824-501/pb-55322-csu-2 pings with view number 1
+S/var/tmp/824-501/pb-55322-csu-1 pings with view number 1
+S/var/tmp/824-501/pb-55322-csu-1 update view to (V2, P/var/tmp/824-501/pb-55322-csu-1, B/var/tmp/824-501/pb-55322-csu-2)
+S/var/tmp/824-501/pb-55322-csu-1 transfering state to S/var/tmp/824-501/pb-55322-csu-2
+S/var/tmp/824-501/pb-55322-csu-2 update view to (V2, P/var/tmp/824-501/pb-55322-csu-1, B/var/tmp/824-501/pb-55322-csu-2)
+S/var/tmp/824-501/pb-55322-csu-2 installed state from S/var/tmp/824-501/pb-55322-csu-1
+S/var/tmp/824-501/pb-55322-csu-1 successefully synced with S/var/tmp/824-501/pb-55322-csu-2
+S/var/tmp/824-501/pb-55322-csu-2 pings with view number 2
+S/var/tmp/824-501/pb-55322-csu-1 pings with view number 2
+S/var/tmp/824-501/pb-55322-csu-2 pings with view number 2
+S/var/tmp/824-501/pb-55322-csu-1 pings with view number 2
+S/var/tmp/824-501/pb-55322-csu-2 pings with view number 2
+S/var/tmp/824-501/pb-55322-csu-1 pings with view number 2
+S/var/tmp/824-501/pb-55322-csu-2 pings with view number 2
+S/var/tmp/824-501/pb-55322-csu-1 pings with view number 2
+S/var/tmp/824-501/pb-55322-csu-1 pings with view number 2
+S/var/tmp/824-501/pb-55322-csu-2 pings with view number 2
+C3921038590072946778 sending PutAppend(0, x, 0)
+unexpected EOF
+C3921038590072946778 failed to contact with primary S/var/tmp/824-501/pb-55322-csu-1
+S/var/tmp/824-501/pb-55322-csu-1 forwarding PutAppend (0, x, 0) to S/var/tmp/824-501/pb-55322-csu-2
+unexpected EOF
+Err = ErrInternal
+S/var/tmp/824-501/pb-55322-csu-1 failed to sync PutAppend (0, x, 0) with S/var/tmp/824-501/pb-55322-csu-2
+S/var/tmp/824-501/pb-55322-csu-1 forwarding PutAppend (0, x, 0) to S/var/tmp/824-501/pb-55322-csu-2
+unexpected EOF
+Err = ErrInternal
+S/var/tmp/824-501/pb-55322-csu-1 failed to sync PutAppend (0, x, 0) with S/var/tmp/824-501/pb-55322-csu-2
+S/var/tmp/824-501/pb-55322-csu-1 forwarding PutAppend (0, x, 0) to S/var/tmp/824-501/pb-55322-csu-2
+S/var/tmp/824-501/pb-55322-csu-2 update cached op id for C3921038590072946778 to 0
+S/var/tmp/824-501/pb-55322-csu-2 executed PutAppend (0, x, 0) from C3921038590072946778
+S/var/tmp/824-501/pb-55322-csu-1 successfuly synced PutAppend (0, x, 0) with S/var/tmp/824-501/pb-55322-csu-2
+S/var/tmp/824-501/pb-55322-csu-1 update cached op id for C3921038590072946778 to 0
+S/var/tmp/824-501/pb-55322-csu-1 executed PutAppend (0, x, 0) from C3921038590072946778
+C3921038590072946778 sending PutAppend(1, x, 1)
+S/var/tmp/824-501/pb-55322-csu-1 forwarding PutAppend (1, x, 1) to S/var/tmp/824-501/pb-55322-csu-2
+unexpected EOF
+Err = ErrInternal
+S/var/tmp/824-501/pb-55322-csu-1 failed to sync PutAppend (1, x, 1) with S/var/tmp/824-501/pb-55322-csu-2
+S/var/tmp/824-501/pb-55322-csu-1 forwarding PutAppend (1, x, 1) to S/var/tmp/824-501/pb-55322-csu-2
+S/var/tmp/824-501/pb-55322-csu-2 update cached op id for C3921038590072946778 to 1
+S/var/tmp/824-501/pb-55322-csu-2 executed PutAppend (1, x, 1) from C3921038590072946778
+S/var/tmp/824-501/pb-55322-csu-1 successfuly synced PutAppend (1, x, 1) with S/var/tmp/824-501/pb-55322-csu-2
+S/var/tmp/824-501/pb-55322-csu-1 update cached op id for C3921038590072946778 to 1
+S/var/tmp/824-501/pb-55322-csu-1 executed PutAppend (1, x, 1) from C3921038590072946778
+S/var/tmp/824-501/pb-55322-csu-1 pings with view number 2
+2022/12/18 12:50:05 S/var/tmp/824-501/pb-55322-csu-2 C3921038590072946778 Shall not happen: args op id = 0  cached op id = 1
+exit status 1
+FAIL	6.824/src/pbservice	2.625s
