@@ -12,11 +12,6 @@ type Clerk struct {
 
 func MakeClerk(me string, server string) *Clerk {
 	ck := new(Clerk)
-	// if len(me) > 1 {
-	// 	ck.me = me[len(me)-1:]
-	// } else {
-	// 	ck.me = me
-	// }
 	ck.me = me
 	ck.server = server
 	return ck

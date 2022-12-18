@@ -1,0 +1,1 @@
+python3 dstest --iter 100 --workers 10 --timeout 30 --output out.log TestBasicFail TestAtMostOnce TestFailPut TestConcurrentSame TestConcurrentSameAppend TestConcurrentSameUnreliable TestRepeatedCrash1 TestRepeatedCrashUnreliable TestPartition1 TestPartition2

@@ -579,6 +579,7 @@ func TestConcurrentSameUnreliable(t *testing.T) {
 
 	{
 		ck := MakeClerk(vshost, "")
+		fmt.Printf("made the init put clerk C%v\n", ck.clerkId)
 		ck.Put("0", "x")
 		ck.Put("1", "x")
 	}
@@ -595,6 +596,7 @@ func TestConcurrentSameUnreliable(t *testing.T) {
 			ok := false
 			defer func() { ch <- ok }()
 			ck := MakeClerk(vshost, "")
+			fmt.Printf("made a put clerk C%v\n", ck.clerkId)
 			rr := rand.New(rand.NewSource(int64(os.Getpid() + i)))
 			for atomic.LoadInt32(&done) == 0 {
 				k := strconv.Itoa(rr.Int() % nkeys)
@@ -617,6 +619,7 @@ func TestConcurrentSameUnreliable(t *testing.T) {
 
 	// read from primary
 	ck := MakeClerk(vshost, "")
+	fmt.Printf("made a get clerk C%v\n", ck.clerkId)
 	var vals [nkeys]string
 	for i := 0; i < nkeys; i++ {
 		vals[i] = ck.Get(strconv.Itoa(i))

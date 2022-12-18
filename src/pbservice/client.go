@@ -37,6 +37,7 @@ func nrand() int64 {
 }
 
 func (ck *Clerk) allocateOpId() uint {
+	// note, no concurrency control requirement for clerk.
 	opId := ck.nextOpId
 	ck.nextOpId += 1
 	return opId
@@ -100,25 +101,28 @@ func (ck *Clerk) Get(key string) string {
 	args := &GetArgs{Me: ck.clerkId, OpId: opId, Key: key, Primary: ck.primary}
 	reply := &GetReply{}
 
+	maybePrintf("C%v starts sending Get(%v, %v)", ck.clerkId, key, opId)
+
 	for {
 		maybePrintf("C%v sending Get(%v, %v)", ck.clerkId, key, opId)
-		// keep args' Primary field up-to-date.
-		args.Primary = ck.primary
 		for !call(ck.primary, "PBServer.Get", args, reply) {
 			// failed to contact with the primary, try to fetch the latest primary.
 			maybePrintf("C%v failed to contact with primary S%v", ck.clerkId, ck.primary)
 			ck.primary = ck.vs.Primary()
 		}
+
+		maybePrintf("C%v receives reply %v of Get (%v, %v)", ck.clerkId, reply.Err, key, opId)
 		if reply.Err == ErrNoKey {
 			return ""
 		}
 		if reply.Err == OK {
 			return reply.Value
 		}
-		// all other errors will not stop the operation.
-		if reply.Err == ErrWrongServer {
-			ck.primary = ck.vs.Primary()
-		}
+		// keep args' Primary field up-to-date.
+		// note, it's feasible to only update the latest primary when the error is ErrWrongServer.
+		// however, I found it's more straightforward to always keep the primary up-to-date.
+		ck.primary = ck.vs.Primary()
+		args.Primary = ck.primary
 	}
 }
 
@@ -135,22 +139,25 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 	args := &PutAppendArgs{Me: ck.clerkId, OpId: opId, Key: key, Value: value, Op: op, Primary: ck.primary}
 	reply := &PutAppendReply{}
 
+	maybePrintf("C%v starts sending PutAppend(%v, %v, %v)", ck.clerkId, key, value, opId)
+
 	for {
 		maybePrintf("C%v sending PutAppend(%v, %v, %v)", ck.clerkId, key, value, opId)
-		// keep args' Primary field up-to-date.
-		args.Primary = ck.primary
 		for !call(ck.primary, "PBServer.PutAppend", args, reply) {
 			// failed to contact with the primary, try to fetch the latest primary.
 			maybePrintf("C%v failed to contact with primary S%v", ck.clerkId, ck.primary)
 			ck.primary = ck.vs.Primary()
 		}
+
+		maybePrintf("C%v receives reply %v of PutAppend (%v, %v, %v)", ck.clerkId, reply.Err, key, value, opId)
 		if reply.Err == OK {
 			break
 		}
-		// all other errors will not stop the operation.
-		if reply.Err == ErrWrongServer {
-			ck.primary = ck.vs.Primary()
-		}
+		// keep args' Primary field up-to-date.
+		// note, it's feasible to only update the latest primary when the error is ErrWrongServer.
+		// however, I found it's more straightforward to always keep the primary up-to-date.
+		args.Primary = ck.primary
+		ck.primary = ck.vs.Primary()
 	}
 }
 

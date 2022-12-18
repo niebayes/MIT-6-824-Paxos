@@ -33,7 +33,7 @@ func port(suffix string) string {
 	return s
 }
 
-func Test1(t *testing.T) {
+func TestViewService(t *testing.T) {
 	runtime.GOMAXPROCS(4)
 
 	vshost := port("v")
