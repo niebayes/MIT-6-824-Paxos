@@ -100,9 +100,8 @@ func (ck *Clerk) Get(key string) string {
 	args := &GetArgs{Me: ck.clerkId, OpId: opId, Key: key, Primary: ck.primary}
 	reply := &GetReply{}
 
-	maybePrintf("C%v sending Get(%v, %v)", ck.clerkId, key, opId)
-
 	for {
+		maybePrintf("C%v sending Get(%v, %v)", ck.clerkId, key, opId)
 		// keep args' Primary field up-to-date.
 		args.Primary = ck.primary
 		for !call(ck.primary, "PBServer.Get", args, reply) {
@@ -136,9 +135,8 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 	args := &PutAppendArgs{Me: ck.clerkId, OpId: opId, Key: key, Value: value, Op: op, Primary: ck.primary}
 	reply := &PutAppendReply{}
 
-	maybePrintf("C%v sending PutAppend(%v, %v, %v)", ck.clerkId, key, value, opId)
-
 	for {
+		maybePrintf("C%v sending PutAppend(%v, %v, %v)", ck.clerkId, key, value, opId)
 		// keep args' Primary field up-to-date.
 		args.Primary = ck.primary
 		for !call(ck.primary, "PBServer.PutAppend", args, reply) {

@@ -813,6 +813,7 @@ func TestRepeatedCrashUnreliable(t *testing.T) {
 		for atomic.LoadInt32(&done) == 0 {
 			i := rr.Int() % nservers
 			// fmt.Printf("%v killing %v\n", ts(), 5001+i)
+			fmt.Printf("killing S%v", sa[i].me)
 			sa[i].kill()
 
 			// wait long enough for new view to form, backup to be initialized
@@ -821,6 +822,7 @@ func TestRepeatedCrashUnreliable(t *testing.T) {
 			sss := StartServer(vshost, port(tag, i+1))
 			samu.Lock()
 			sa[i] = sss
+			fmt.Printf("restart S%v", sa[i].me)
 			samu.Unlock()
 
 			// wait long enough for new view to form, backup to be initialized
@@ -833,6 +835,7 @@ func TestRepeatedCrashUnreliable(t *testing.T) {
 		ret := -1
 		defer func() { ch <- ret }()
 		ck := MakeClerk(vshost, "")
+		fmt.Printf("Test made a clerk C%v", ck.clerkId)
 		n := 0
 		for atomic.LoadInt32(&done) == 0 {
 			v := "x " + strconv.Itoa(i) + " " + strconv.Itoa(n) + " y"

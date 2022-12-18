@@ -122,12 +122,11 @@ func (pb *PBServer) Get(args *GetArgs, reply *GetReply) error {
 	// everything's ok.
 	reply.Err = OK
 	reply.Value = val
+	maybePrintf("S%v executed Get (%v, %v) from C%v", pb.me, args.Key, args.OpId, args.Me)
 
 	// update the latest executed operation id for this client.
 	pb.lastExecOpId[args.Me] = args.OpId
 	maybePrintf("S%v update cached op id for C%v to %v", pb.me, args.Me, args.OpId)
-
-	maybePrintf("S%v executed Get (%v, %v) from C%v", pb.me, args.Key, args.OpId, args.Me)
 
 	// no error.
 	return nil
@@ -208,12 +207,11 @@ func (pb *PBServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error 
 	// everything's ok.
 	reply.Err = OK
 	reply.Value = primReply.Value
+	maybePrintf("S%v executed PutAppend (%v, %v, %v) from C%v", pb.me, args.Key, args.Value, args.OpId, args.Me)
 
 	// update the latest executed operation id for this client.
 	pb.lastExecOpId[args.Me] = args.OpId
 	maybePrintf("S%v update cached op id for C%v to %v", pb.me, args.Me, args.OpId)
-
-	maybePrintf("S%v executed PutAppend (%v, %v, %v) from C%v", pb.me, args.Key, args.Value, args.OpId, args.Me)
 
 	// no error.
 	return nil
@@ -331,9 +329,11 @@ func StartServer(vshost string, me string) *PBServer {
 			if err == nil && pb.isdead() == false {
 				if pb.isunreliable() && (rand.Int63()%1000) < 100 {
 					// discard the request.
+					maybePrintf("S%v discard a request", pb.me)
 					conn.Close()
 				} else if pb.isunreliable() && (rand.Int63()%1000) < 200 {
 					// process the request but force discard of reply.
+					maybePrintf("S%v discard a reply", pb.me)
 					c1 := conn.(*net.UnixConn)
 					f, _ := c1.File()
 					err := syscall.Shutdown(int(f.Fd()), syscall.SHUT_WR)
