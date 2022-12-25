@@ -18,13 +18,6 @@ type ViewServer struct {
 	rpccount int32 // for testing
 	me       string
 
-	// there're three cases the view service could generate a new view:
-	// (1) the view service has not received a ping from a server (primary or backup) for DeadPings * PingInterval.
-	// (2) the view service receives a ping with view number 0 which indicates the server crashed and restarted.
-	// (3) there's no backup in the current view and the view service has received a ping from an idle server, i.e.
-	//     neither the primary nor the backup.
-	// In summary, any event that could lead to the change of the current view will drive the view service proceed to the
-	// next view.
 	// However, there's restriction that the view service could only change its view until it has received a ping from
 	// the primary of the current view.
 
@@ -130,8 +123,9 @@ func (vs *ViewServer) Ping(args *PingArgs, reply *PingReply) error {
 		vs.maybeRemoveServer(server)
 	}
 
+	vs.maybePromote()
+
 	if vs.primaryAcked {
-		vs.maybePromote()
 		vs.maybeSwitchView()
 	}
 
@@ -188,8 +182,9 @@ func (vs *ViewServer) tick() {
 		vs.maybeRemoveServer(server)
 	}
 
+	vs.maybePromote()
+
 	if vs.primaryAcked {
-		vs.maybePromote()
 		vs.maybeSwitchView()
 	}
 }
