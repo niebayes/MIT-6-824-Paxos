@@ -85,32 +85,6 @@ func cleanup(pxa []*Paxos) {
 	}
 }
 
-func noTestSpeed(t *testing.T) {
-	runtime.GOMAXPROCS(4)
-
-	const npaxos = 3
-	var pxa []*Paxos = make([]*Paxos, npaxos)
-	var pxh []string = make([]string, npaxos)
-	defer cleanup(pxa)
-
-	for i := 0; i < npaxos; i++ {
-		pxh[i] = port("time", i)
-	}
-	for i := 0; i < npaxos; i++ {
-		pxa[i] = Make(pxh, i, nil)
-	}
-
-	t0 := time.Now()
-
-	for i := 0; i < 20; i++ {
-		pxa[0].Start(i, "x")
-		waitn(t, pxa, i, npaxos)
-	}
-
-	d := time.Since(t0)
-	fmt.Printf("20 agreements %v seconds\n", d.Seconds())
-}
-
 func TestBasic(t *testing.T) {
 	runtime.GOMAXPROCS(4)
 
@@ -365,9 +339,7 @@ func TestManyForget(t *testing.T) {
 	fmt.Printf("  ... Passed\n")
 }
 
-//
 // does paxos forgetting actually free the memory?
-//
 func TestForgetMem(t *testing.T) {
 	runtime.GOMAXPROCS(4)
 
@@ -453,9 +425,7 @@ func TestForgetMem(t *testing.T) {
 	fmt.Printf("  ... Passed\n")
 }
 
-//
 // does Max() work after Done()s?
-//
 func TestDoneMax(t *testing.T) {
 	runtime.GOMAXPROCS(4)
 
@@ -572,9 +542,7 @@ func TestRPCCount(t *testing.T) {
 	fmt.Printf("  ... Passed\n")
 }
 
-//
 // many agreements (without failures)
-//
 func TestMany(t *testing.T) {
 	runtime.GOMAXPROCS(4)
 
@@ -621,10 +589,8 @@ func TestMany(t *testing.T) {
 	fmt.Printf("  ... Passed\n")
 }
 
-//
 // a peer starts up, with proposal, after others decide.
 // then another peer starts, without a proposal.
-//
 func TestOld(t *testing.T) {
 	runtime.GOMAXPROCS(4)
 
@@ -659,9 +625,7 @@ func TestOld(t *testing.T) {
 	fmt.Printf("  ... Passed\n")
 }
 
-//
 // many agreements, with unreliable RPC
-//
 func TestManyUnreliable(t *testing.T) {
 	runtime.GOMAXPROCS(4)
 

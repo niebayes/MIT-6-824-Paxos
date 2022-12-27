@@ -31,7 +31,6 @@ import "sync/atomic"
 import "fmt"
 import "math/rand"
 
-
 // px.Status() return values, indicating
 // whether an agreement has been decided,
 // or Paxos has not yet reached agreement,
@@ -52,83 +51,42 @@ type Paxos struct {
 	rpcCount   int32 // for testing
 	peers      []string
 	me         int // index into peers[]
-
-
-	// Your data here.
 }
 
-//
-// call() sends an RPC to the rpcname handler on server srv
-// with arguments args, waits for the reply, and leaves the
-// reply in reply. the reply argument should be a pointer
-// to a reply structure.
-//
-// the return value is true if the server responded, and false
-// if call() was not able to contact the server. in particular,
-// the replys contents are only valid if call() returned true.
-//
-// you should assume that call() will time out and return an
-// error after a while if it does not get a reply from the server.
-//
-// please use call() to send all RPCs, in client.go and server.go.
-// please do not change this function.
-//
-func call(srv string, name string, args interface{}, reply interface{}) bool {
-	c, err := rpc.Dial("unix", srv)
-	if err != nil {
-		err1 := err.(*net.OpError)
-		if err1.Err != syscall.ENOENT && err1.Err != syscall.ECONNREFUSED {
-			fmt.Printf("paxos Dial() failed: %v\n", err1)
-		}
-		return false
-	}
-	defer c.Close()
-
-	err = c.Call(name, args, reply)
-	if err == nil {
-		return true
-	}
-
-	fmt.Println(err)
-	return false
-}
-
-
-//
 // the application wants paxos to start agreement on
 // instance seq, with proposed value v.
 // Start() returns right away; the application will
 // call Status() to find out if/when agreement
 // is reached.
-//
 func (px *Paxos) Start(seq int, v interface{}) {
-	// Your code here.
 }
 
-//
+// the application wants to know whether this
+// peer thinks an instance has been decided,
+// and if so what the agreed value is. Status()
+// should just inspect the local peer state;
+// it should not contact other Paxos peers.
+func (px *Paxos) Status(seq int) (Fate, interface{}) {
+	return Pending, nil
+}
+
 // the application on this machine is done with
 // all instances <= seq.
 //
 // see the comments for Min() for more explanation.
-//
 func (px *Paxos) Done(seq int) {
-	// Your code here.
 }
 
-//
 // the application wants to know the
 // highest instance sequence known to
 // this peer.
-//
 func (px *Paxos) Max() int {
-	// Your code here.
 	return 0
 }
 
-//
 // Min() should return one more than the minimum among z_i,
 // where z_i is the highest number ever passed
-// to Done() on peer i. A peers z_i is -1 if it has
+// to Done() on peer i. A peer's z_i is -1 if it has
 // never called Done().
 //
 // Paxos is required to have forgotten all information
@@ -140,7 +98,7 @@ func (px *Paxos) Max() int {
 // arguments in order to implement Min(). These
 // exchanges can be piggybacked on ordinary Paxos
 // agreement protocol messages, so it is OK if one
-// peers Min does not reflect another Peers Done()
+// peer's Min does not reflect another peer's Done()
 // until after the next instance is agreed to.
 //
 // The fact that Min() is defined as a minimum over
@@ -152,31 +110,13 @@ func (px *Paxos) Max() int {
 // life, it will need to catch up on instances that it
 // missed -- the other peers therefor cannot forget these
 // instances.
-//
 func (px *Paxos) Min() int {
-	// You code here.
 	return 0
 }
 
-//
-// the application wants to know whether this
-// peer thinks an instance has been decided,
-// and if so what the agreed value is. Status()
-// should just inspect the local peer state;
-// it should not contact other Paxos peers.
-//
-func (px *Paxos) Status(seq int) (Fate, interface{}) {
-	// Your code here.
-	return Pending, nil
-}
-
-
-
-//
 // tell the peer to shut itself down.
 // for testing.
 // please do not change these two functions.
-//
 func (px *Paxos) Kill() {
 	atomic.StoreInt32(&px.dead, 1)
 	if px.l != nil {
@@ -184,9 +124,7 @@ func (px *Paxos) Kill() {
 	}
 }
 
-//
 // has this peer been asked to shut down?
-//
 func (px *Paxos) isdead() bool {
 	return atomic.LoadInt32(&px.dead) != 0
 }
@@ -204,18 +142,13 @@ func (px *Paxos) isunreliable() bool {
 	return atomic.LoadInt32(&px.unreliable) != 0
 }
 
-//
 // the application wants to create a paxos peer.
 // the ports of all the paxos peers (including this one)
 // are in peers[]. this servers port is peers[me].
-//
 func Make(peers []string, me int, rpcs *rpc.Server) *Paxos {
 	px := &Paxos{}
 	px.peers = peers
 	px.me = me
-
-
-	// Your initialization code here.
 
 	if rpcs != nil {
 		// caller will create socket &c
@@ -238,9 +171,9 @@ func Make(peers []string, me int, rpcs *rpc.Server) *Paxos {
 
 		// create a thread to accept RPC connections
 		go func() {
-			for px.isdead() == false {
+			for !px.isdead() {
 				conn, err := px.l.Accept()
-				if err == nil && px.isdead() == false {
+				if err == nil && !px.isdead() {
 					if px.isunreliable() && (rand.Int63()%1000) < 100 {
 						// discard the request.
 						conn.Close()
@@ -261,13 +194,12 @@ func Make(peers []string, me int, rpcs *rpc.Server) *Paxos {
 				} else if err == nil {
 					conn.Close()
 				}
-				if err != nil && px.isdead() == false {
+				if err != nil && !px.isdead() {
 					fmt.Printf("Paxos(%v) accept: %v\n", me, err.Error())
 				}
 			}
 		}()
 	}
-
 
 	return px
 }
