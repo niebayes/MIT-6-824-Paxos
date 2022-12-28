@@ -6,6 +6,70 @@ import "net/rpc"
 import "syscall"
 import "fmt"
 
+type Err string
+
+const (
+	OK             = "OK"
+	ErrRejected    = "Rejected"
+	ErrWrongLeader = "WrongLeader"
+)
+
+type RedirectArgs struct {
+	Me     int
+	SeqNum int
+	Value  interface{}
+}
+
+type RedirectReply struct {
+	Err Err
+}
+
+type HeartbeatArgs struct {
+	Me         int
+	DoneSeqNum int
+}
+
+type HeartbeatReply struct {
+}
+
+type PrepareArgs struct {
+	Me      int
+	SeqNum  int
+	PropNum uint64
+}
+
+type PrepareReply struct {
+	Err            Err
+	Me             int
+	SeqNum         int
+	AcceptedProp   *Proposal
+	NoMoreAccepted bool
+}
+
+type AcceptArgs struct {
+	Me     int
+	SeqNum int
+	Prop   *Proposal
+}
+
+type AcceptReply struct {
+	Err    Err
+	Me     int
+	SeqNum int
+}
+
+type DecideArgs struct {
+	Me     int
+	SeqNum int
+	Prop   *Proposal
+}
+
+type DecideReply struct {
+	Err    Err
+	Me     int
+	SeqNum int
+}
+
 // call() sends an RPC to the rpcname handler on server srv
 // with arguments args, waits for the reply, and leaves the
 // reply in reply. the reply argument should be a pointer

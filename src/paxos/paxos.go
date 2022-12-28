@@ -20,16 +20,18 @@ package paxos
 // px.Min() int -- instances before this seq have been forgotten
 //
 
-import "net"
-import "net/rpc"
-import "log"
-
-import "os"
-import "syscall"
-import "sync"
-import "sync/atomic"
-import "fmt"
-import "math/rand"
+import (
+	"fmt"
+	"log"
+	"math/rand"
+	"net"
+	"net/rpc"
+	"os"
+	"sync"
+	"sync/atomic"
+	"syscall"
+	"time"
+)
 
 // px.Status() return values, indicating
 // whether an agreement has been decided,
@@ -43,6 +45,12 @@ const (
 	Forgotten      // decided but forgotten.
 )
 
+// tick interval = 100ms.
+const TickInterval = 100 * time.Millisecond
+
+// check interval = 500ms.
+const checkInterval = 500 * time.Millisecond
+
 type Paxos struct {
 	mu         sync.Mutex
 	l          net.Listener
@@ -51,6 +59,131 @@ type Paxos struct {
 	rpcCount   int32 // for testing
 	peers      []string
 	me         int // index into peers[]
+
+	// this peer believes peers[leader] is the leader.
+	leader int
+	// the last time receiving heartbeat from each peer.
+	lastHeartbeatTime []time.Time
+	// paxos instances.
+	// index: sequence number, value: paxos instance.
+	instances []*Instance
+	// current proposal number.
+	propNum uint64
+	// this peer promises not to accept any proposals with proposal numbers less than minAcceptPropNum.
+	// this value binds with the whole paxos instances, not a single one.
+	minAcceptPropNum uint64
+	// the i-th peer gets proposal numbers i, i + N, i + 2N, ... where N is len(peers), and i is the index into peers.
+	// roundNum is the factor of N.
+	// this allocation scheme ensures the uniqueness of proposal numbers for different proposers.
+	roundNum uint64
+	// if the i-th peer reported no more accepted, then the i-th slot is true.
+	noMoreAccepted []bool
+
+	// the following fields are required by lab, not by paxos.
+
+	// the highest sequence number ever passed to Done.
+	maxDoneSeqNum int
+	// instances with seq num <= truncatedSeqNum are forgotten and hence are truncated out.
+	truncatedSeqNum int
+}
+
+// the application wants to create a paxos peer.
+// the ports of all the paxos peers (including this one)
+// are in peers[]. this servers port is peers[me].
+func Make(peers []string, me int, rpcs *rpc.Server) *Paxos {
+	px := &Paxos{}
+	px.peers = peers
+	px.me = me
+	px.mu = sync.Mutex{}
+
+	px.leader = px.me
+	px.lastHeartbeatTime = make([]time.Time, len(peers))
+
+	px.instances = make([]*Instance, 0)
+	px.propNum = 0
+	px.minAcceptPropNum = 0
+	px.roundNum = 0
+
+	px.noMoreAccepted = make([]bool, len(peers))
+
+	px.maxDoneSeqNum = -1
+	px.truncatedSeqNum = -1
+
+	// initially, this peer heared no heartbeats.
+	for i := range px.peers {
+		px.lastHeartbeatTime[i] = time.Now()
+	}
+	// wait a while so that this peer thinks it's the leader.
+	time.Sleep(2 * TickInterval)
+
+	// create a thread to tick periodically.
+	go px.tick()
+
+	if rpcs != nil {
+		// caller will create socket &c
+		rpcs.Register(px)
+	} else {
+		rpcs = rpc.NewServer()
+		rpcs.Register(px)
+
+		// prepare to receive connections from clients.
+		// change "unix" to "tcp" to use over a network.
+		os.Remove(peers[me]) // only needed for "unix"
+		l, e := net.Listen("unix", peers[me])
+		if e != nil {
+			log.Fatal("listen error: ", e)
+		}
+		px.l = l
+
+		// please do not change any of the following code,
+		// or do anything to subvert it.
+
+		// create a thread to accept RPC connections
+		go func() {
+			for !px.isdead() {
+				conn, err := px.l.Accept()
+				if err == nil && !px.isdead() {
+					if px.isunreliable() && (rand.Int63()%1000) < 100 {
+						// discard the request.
+						conn.Close()
+					} else if px.isunreliable() && (rand.Int63()%1000) < 200 {
+						// process the request but force discard of reply.
+						c1 := conn.(*net.UnixConn)
+						f, _ := c1.File()
+						err := syscall.Shutdown(int(f.Fd()), syscall.SHUT_WR)
+						if err != nil {
+							fmt.Printf("shutdown: %v\n", err)
+						}
+						atomic.AddInt32(&px.rpcCount, 1)
+						go rpcs.ServeConn(conn)
+					} else {
+						atomic.AddInt32(&px.rpcCount, 1)
+						go rpcs.ServeConn(conn)
+					}
+				} else if err == nil {
+					conn.Close()
+				}
+				if err != nil && !px.isdead() {
+					fmt.Printf("Paxos(%v) accept: %v\n", me, err.Error())
+				}
+			}
+		}()
+	}
+
+	return px
+}
+
+func (px *Paxos) isLeader() bool {
+	px.mu.Lock()
+	defer px.mu.Unlock()
+	return px.leader == px.me
+}
+
+// return true if any prepare or accept for this instance was rejected.
+func (px *Paxos) rejected(ins *Instance) bool {
+	px.mu.Lock()
+	defer px.mu.Unlock()
+	return ins.rejected
 }
 
 // the application wants paxos to start agreement on
@@ -59,6 +192,21 @@ type Paxos struct {
 // call Status() to find out if/when agreement
 // is reached.
 func (px *Paxos) Start(seq int, v interface{}) {
+	px.mu.Lock()
+	defer px.mu.Unlock()
+
+	px.maybeExtendInstances(seq)
+
+	if px.instances[seq] == nil {
+		px.instances[seq] = makeInstance(seq, v, len(px.peers))
+		if px.leader == px.me {
+			printf("S%v starts proposing (N=%v V=%v)", px.me, seq, v)
+			go px.doPrepare(px.instances[seq])
+		} else {
+			printf("S%v starts redirecting (N=%v V=%v)", px.me, seq, v)
+			go px.redirectProposal(px.instances[seq])
+		}
+	}
 }
 
 // the application wants to know whether this
@@ -67,6 +215,16 @@ func (px *Paxos) Start(seq int, v interface{}) {
 // should just inspect the local peer state;
 // it should not contact other Paxos peers.
 func (px *Paxos) Status(seq int) (Fate, interface{}) {
+	px.mu.Lock()
+	defer px.mu.Unlock()
+
+	if len(px.instances) < seq && px.instances[seq] != nil {
+		ins := px.instances[seq]
+		if ins.status == Decided {
+			return Decided, ins.acceptedProp.Value
+		}
+	}
+
 	return Pending, nil
 }
 
@@ -81,7 +239,9 @@ func (px *Paxos) Done(seq int) {
 // highest instance sequence known to
 // this peer.
 func (px *Paxos) Max() int {
-	return 0
+	px.mu.Lock()
+	defer px.mu.Unlock()
+	return len(px.instances) - 1
 }
 
 // Min() should return one more than the minimum among z_i,
@@ -140,66 +300,4 @@ func (px *Paxos) setunreliable(what bool) {
 
 func (px *Paxos) isunreliable() bool {
 	return atomic.LoadInt32(&px.unreliable) != 0
-}
-
-// the application wants to create a paxos peer.
-// the ports of all the paxos peers (including this one)
-// are in peers[]. this servers port is peers[me].
-func Make(peers []string, me int, rpcs *rpc.Server) *Paxos {
-	px := &Paxos{}
-	px.peers = peers
-	px.me = me
-
-	if rpcs != nil {
-		// caller will create socket &c
-		rpcs.Register(px)
-	} else {
-		rpcs = rpc.NewServer()
-		rpcs.Register(px)
-
-		// prepare to receive connections from clients.
-		// change "unix" to "tcp" to use over a network.
-		os.Remove(peers[me]) // only needed for "unix"
-		l, e := net.Listen("unix", peers[me])
-		if e != nil {
-			log.Fatal("listen error: ", e)
-		}
-		px.l = l
-
-		// please do not change any of the following code,
-		// or do anything to subvert it.
-
-		// create a thread to accept RPC connections
-		go func() {
-			for !px.isdead() {
-				conn, err := px.l.Accept()
-				if err == nil && !px.isdead() {
-					if px.isunreliable() && (rand.Int63()%1000) < 100 {
-						// discard the request.
-						conn.Close()
-					} else if px.isunreliable() && (rand.Int63()%1000) < 200 {
-						// process the request but force discard of reply.
-						c1 := conn.(*net.UnixConn)
-						f, _ := c1.File()
-						err := syscall.Shutdown(int(f.Fd()), syscall.SHUT_WR)
-						if err != nil {
-							fmt.Printf("shutdown: %v\n", err)
-						}
-						atomic.AddInt32(&px.rpcCount, 1)
-						go rpcs.ServeConn(conn)
-					} else {
-						atomic.AddInt32(&px.rpcCount, 1)
-						go rpcs.ServeConn(conn)
-					}
-				} else if err == nil {
-					conn.Close()
-				}
-				if err != nil && !px.isdead() {
-					fmt.Printf("Paxos(%v) accept: %v\n", me, err.Error())
-				}
-			}
-		}()
-	}
-
-	return px
 }
