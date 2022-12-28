@@ -5,6 +5,7 @@ import (
 )
 
 // heartbeat ticker.
+// TODO: remove leader election.
 func (px *Paxos) tick() {
 	for !px.isdead() {
 		// the max id among peers known to be alive currently.
@@ -21,6 +22,9 @@ func (px *Paxos) tick() {
 			}
 		}
 		// the leader is the alive peer with the highest id.
+		if maxAliveId != px.leader {
+			printf("S%v thinks S%v is the leader", px.me, maxAliveId)
+		}
 		px.leader = maxAliveId
 		px.mu.Unlock()
 

@@ -15,9 +15,10 @@ const (
 )
 
 type RedirectArgs struct {
-	Me     int
-	SeqNum int
-	Value  interface{}
+	Me      int
+	SeqNum  int
+	Value   interface{}
+	Decided bool
 }
 
 type RedirectReply struct {

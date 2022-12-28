@@ -200,7 +200,6 @@ func (px *Paxos) Start(seq int, v interface{}) {
 	if px.instances[seq] == nil {
 		px.instances[seq] = makeInstance(seq, v, len(px.peers))
 		if px.leader == px.me {
-			printf("S%v starts proposing (N=%v V=%v)", px.me, seq, v)
 			go px.doPrepare(px.instances[seq])
 		} else {
 			printf("S%v starts redirecting (N=%v V=%v)", px.me, seq, v)
@@ -218,7 +217,7 @@ func (px *Paxos) Status(seq int) (Fate, interface{}) {
 	px.mu.Lock()
 	defer px.mu.Unlock()
 
-	if len(px.instances) < seq && px.instances[seq] != nil {
+	if len(px.instances) > seq && px.instances[seq] != nil {
 		ins := px.instances[seq]
 		if ins.status == Decided {
 			return Decided, ins.acceptedProp.Value

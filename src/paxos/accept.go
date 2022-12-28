@@ -64,7 +64,14 @@ func (px *Paxos) doAccept(ins *Instance) {
 	printf("S%v starts doing accept on proposal (N=%v P=%v V=%v)", px.me, ins.seqNum, px.propNum, ins.value)
 
 	// send Accept to peers that have not reported accept OK.
-	for !px.isdead() && px.isLeader() {
+	for !px.isdead() {
+		if !px.isLeader() {
+			// redirect the proposal to the current leader.
+			printf("S%v starts redirecting (N=%v V=%v)", px.me, ins.seqNum, ins.value)
+			go px.redirectProposal(ins)
+			break
+		}
+
 		if px.rejected(ins) {
 			// this proposal was rejected, start a new round of proposal with a higher proposal number.
 			printf("S%v knows proposal (N=%v P=%v V=%v) was rejected", px.me, ins.seqNum, px.propNum, ins.value)
@@ -74,7 +81,7 @@ func (px *Paxos) doAccept(ins *Instance) {
 
 		if px.majorityAccepted(ins) {
 			// start the decide phase if a majority of peers have reported accepted.
-			printf("S%v knows proposal (N=%v P=%v V=%v) was decided", px.me, ins.seqNum, px.propNum, ins.value)
+			printf("S%v knows proposal (N=%v P=%v V=%v) was accepted by a majority", px.me, ins.seqNum, px.propNum, ins.value)
 			ins.status = Decided
 			go px.doDecide(ins)
 			break

@@ -4,8 +4,8 @@ import (
 	"time"
 )
 
-func (px *Paxos) sendRedirect(seqNum int, value interface{}) bool {
-	args := &RedirectArgs{Me: px.me, SeqNum: seqNum, Value: value}
+func (px *Paxos) sendRedirect(seqNum int, value interface{}, decided bool) bool {
+	args := &RedirectArgs{Me: px.me, SeqNum: seqNum, Value: value, Decided: decided}
 	reply := &RedirectReply{}
 	if call(px.peers[px.leader], "Paxos.Redirect", args, reply) {
 		return reply.Err == OK
@@ -25,7 +25,7 @@ func (px *Paxos) redirectProposal(ins *Instance) {
 
 		// keep sending the proposal to the current leader until
 		// it reports that it has received.
-		if px.sendRedirect(ins.seqNum, ins.value) {
+		if px.sendRedirect(ins.seqNum, ins.value, ins.status == Decided) {
 			break
 		}
 
@@ -33,7 +33,7 @@ func (px *Paxos) redirectProposal(ins *Instance) {
 	}
 }
 
-func (px *Paxos) Redirect(args *DecideArgs, reply *DecideReply) error {
+func (px *Paxos) Redirect(args *RedirectArgs, reply *RedirectReply) error {
 	px.mu.Lock()
 	defer px.mu.Unlock()
 
@@ -48,9 +48,13 @@ func (px *Paxos) Redirect(args *DecideArgs, reply *DecideReply) error {
 	px.maybeExtendInstances(args.SeqNum)
 
 	if px.instances[args.SeqNum] == nil {
-		px.instances[args.SeqNum] = makeInstance(args.SeqNum, args.Prop.Value, len(px.peers))
-		printf("S%v starts proposing (N=%v V=%v)", px.me, args.SeqNum, args.Prop.Value)
+		px.instances[args.SeqNum] = makeInstance(args.SeqNum, args.Value, len(px.peers))
+	}
+
+	if !args.Decided {
 		go px.doPrepare(px.instances[args.SeqNum])
+	} else {
+		go px.doDecide(px.instances[args.SeqNum])
 	}
 
 	reply.Err = OK

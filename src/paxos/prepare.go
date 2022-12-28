@@ -9,7 +9,7 @@ func (px *Paxos) allocatePropNum() uint64 {
 	defer px.mu.Unlock()
 
 	newPropNum := px.propNum
-	for newPropNum < px.propNum {
+	for newPropNum <= px.propNum {
 		newPropNum = uint64(px.me) + px.roundNum*uint64(len(px.peers))
 		px.roundNum++
 	}
@@ -80,7 +80,14 @@ func (px *Paxos) doPrepare(ins *Instance) {
 
 	printf("S%v starts doing prepare on proposal (N=%v P=%v V=%v)", px.me, ins.seqNum, px.propNum, ins.value)
 
-	for !px.isdead() && px.isLeader() {
+	for !px.isdead() {
+		if !px.isLeader() {
+			// redirect the proposal to the current leader.
+			printf("S%v starts redirecting (N=%v V=%v)", px.me, ins.seqNum, ins.value)
+			go px.redirectProposal(ins)
+			break
+		}
+
 		if px.rejected(ins) {
 			// this proposal was rejected, start a new round of proposal with a higher proposal number.
 			printf("S%v knows proposal (N=%v P=%v V=%v) was rejected", px.me, ins.seqNum, px.propNum, ins.value)
@@ -90,7 +97,7 @@ func (px *Paxos) doPrepare(ins *Instance) {
 
 		if px.majorityPrepared(ins) {
 			// start the accept phase if a majority of peers have reported prepared, either by replying prepare OK or no more accepted.
-			printf("S%v knows proposal (N=%v P=%v V=%v) was prepared", px.me, ins.seqNum, px.propNum, ins.value)
+			printf("S%v knows proposal (N=%v P=%v V=%v) was prepared by a majority", px.me, ins.seqNum, px.propNum, ins.value)
 			go px.doAccept(ins)
 			break
 		}
@@ -139,7 +146,7 @@ func (px *Paxos) Prepare(args *PrepareArgs, reply *PrepareReply) error {
 	reply.NoMoreAccepted = true
 	if len(px.instances) > args.SeqNum {
 		for _, ins := range px.instances[args.SeqNum+1:] {
-			if ins.acceptedProp != nil {
+			if ins != nil && ins.acceptedProp != nil {
 				reply.NoMoreAccepted = false
 				break
 			}

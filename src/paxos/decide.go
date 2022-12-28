@@ -43,7 +43,7 @@ func (px *Paxos) broadcastDecides(ins *Instance) {
 		} else {
 			// make a local call if the receiver is myself.
 			go func() {
-				args := &DecideArgs{}
+				args := &DecideArgs{Me: px.me, SeqNum: ins.seqNum, Prop: &Proposal{PropNum: px.propNum, Value: ins.value}}
 				reply := &DecideReply{}
 				px.Decide(args, reply)
 				px.handleDecideReply(args, reply)
@@ -53,7 +53,14 @@ func (px *Paxos) broadcastDecides(ins *Instance) {
 }
 
 func (px *Paxos) doDecide(ins *Instance) {
-	for !px.isdead() && px.isLeader() {
+	for !px.isdead() {
+		if !px.isLeader() {
+			// redirect the proposal to the current leader.
+			printf("S%v starts redirecting (N=%v V=%v)", px.me, ins.seqNum, ins.value)
+			go px.redirectProposal(ins)
+			break
+		}
+
 		if px.rejected(ins) {
 			// increase the proposal number to let the acceptor not reject the Decide msg.
 			px.propNum = px.allocatePropNum()
@@ -112,7 +119,7 @@ func (px *Paxos) Decide(args *DecideArgs, reply *DecideReply) error {
 	reply.Err = OK
 	reply.SeqNum = args.SeqNum
 
-	printf("S%v accepts proposal (N=%v P=%v V=%v) from S%v", px.me, args.SeqNum, args.Prop.PropNum, args.Prop.Value, args.Me)
+	printf("S%v decides proposal (N=%v P=%v V=%v) from S%v", px.me, args.SeqNum, args.Prop.PropNum, args.Prop.Value, args.Me)
 
 	return nil
 }
