@@ -1,14 +1,11 @@
 package paxos
 
 import (
-	"time"
+	"sync"
 )
 
 // return true if a majority of acceptors has accepted this proposal.
 func (px *Paxos) majorityAccepted(ins *Instance) bool {
-	px.mu.Lock()
-	defer px.mu.Unlock()
-
 	numAccepted := 0
 	for i := range px.peers {
 		if ins.acceptOK[i] {
@@ -19,121 +16,78 @@ func (px *Paxos) majorityAccepted(ins *Instance) bool {
 	return numAccepted*2 > len(px.peers)
 }
 
-func (px *Paxos) sendAccept(peer int, ins *Instance) {
-	args := &AcceptArgs{Me: px.me, SeqNum: ins.seqNum, Prop: &Proposal{PropNum: px.propNum, Value: ins.value}}
+func (px *Paxos) sendAccept(peer int, ins *Instance, wg *sync.WaitGroup) {
+	args := &AcceptArgs{Me: px.me, SeqNum: ins.seqNum, PropNum: ins.propNum, Value: ins.value}
 	reply := &AcceptReply{}
 	if call(px.peers[peer], "Paxos.Accept", args, reply) {
 		px.handleAcceptReply(args, reply)
 	} else {
 		printf("S%v failed to send Accept to S%v", px.me, peer)
 	}
+
+	wg.Done()
 }
 
-func (px *Paxos) broadcastAccepts(ins *Instance) {
-	px.mu.Lock()
-	defer px.mu.Unlock()
+func (px *Paxos) broadcastAccepts(ins *Instance, done chan bool) {
+	wg := &sync.WaitGroup{}
+	wg.Add(len(px.peers))
 
 	for i := range px.peers {
-		if ins.acceptOK[i] {
-			continue
-		}
-
 		if i != px.me {
-			go px.sendAccept(i, ins)
+			go px.sendAccept(i, ins, wg)
 		} else {
 			// make a local call if the receiver is myself.
 			go func() {
-				args := &AcceptArgs{Me: px.me, SeqNum: ins.seqNum, Prop: &Proposal{PropNum: px.propNum, Value: ins.value}}
+				args := &AcceptArgs{Me: px.me, SeqNum: ins.seqNum, PropNum: ins.propNum, Value: ins.value}
 				reply := &AcceptReply{}
 				px.Accept(args, reply)
 				px.handleAcceptReply(args, reply)
+				wg.Done()
 			}()
 		}
 	}
-}
 
-func (px *Paxos) doAccept(ins *Instance) {
-	// choose the proposed value with the highest proposal number.
-	maxPropNum := uint64(0)
-	for i := range px.peers {
-		if ins.peerAcceptedProps[i] != nil && ins.peerAcceptedProps[i].PropNum > maxPropNum {
-			ins.value = ins.peerAcceptedProps[i].Value
-		}
-	}
+	// wait responses of all peers.
+	wg.Wait()
 
-	printf("S%v starts doing accept on proposal (N=%v P=%v V=%v)", px.me, ins.seqNum, px.propNum, ins.value)
-
-	// send Accept to peers that have not reported accept OK.
-	for !px.isdead() {
-		if !px.isLeader() {
-			// redirect the proposal to the current leader.
-			printf("S%v starts redirecting (N=%v V=%v)", px.me, ins.seqNum, ins.value)
-			go px.redirectProposal(ins)
-			break
-		}
-
-		if px.rejected(ins) {
-			// this proposal was rejected, start a new round of proposal with a higher proposal number.
-			printf("S%v knows proposal (N=%v P=%v V=%v) was rejected", px.me, ins.seqNum, px.propNum, ins.value)
-			go px.doPrepare(ins)
-			break
-		}
-
-		if px.majorityAccepted(ins) {
-			// start the decide phase if a majority of peers have reported accepted.
-			printf("S%v knows proposal (N=%v P=%v V=%v) was accepted by a majority", px.me, ins.seqNum, px.propNum, ins.value)
-			ins.status = Decided
-			go px.doDecide(ins)
-			break
-		}
-
-		// send Accept to unaccepted peers.
-		px.broadcastAccepts(ins)
-
-		// check their responses later.
-		time.Sleep(checkInterval)
-	}
+	done <- px.majorityAccepted(ins)
+	close(done)
 }
 
 func (px *Paxos) Accept(args *AcceptArgs, reply *AcceptReply) error {
 	px.mu.Lock()
 	defer px.mu.Unlock()
 
+	reply.Err = OK
 	reply.Me = px.me
 
-	// reject if the sender is not the current leader.
-	if args.Me != px.leader {
-		printf("S%v rejects Accept (N=%v P=%v V=%v) coz the sender S%v is not leader", px.me, args.SeqNum, args.Prop.PropNum, args.Prop.Value, args.Me)
-		reply.Err = ErrWrongLeader
-		return nil
+	ins, exist := px.instances[args.SeqNum]
+	if !exist {
+		px.instances[args.SeqNum] = makeInstance(args.SeqNum, nil, len(px.peers))
+		ins = px.instances[args.SeqNum]
 	}
 
-	// reject if violates the promise.
-	if px.minAcceptPropNum > args.Prop.PropNum {
-		printf("S%v rejects Prepare (N=%v P=%v V=%v) from S%v to keep the promise (MAP=%v)", px.me, args.SeqNum, args.Prop.PropNum, args.Prop.Value, args.Me, px.minAcceptPropNum)
+	// proposals of older rounds of paxos are rejected.
+	// if the proposal number equals the maxSeenPreparePropNum, this means
+	// this accept corresponds to the latest accepted prepare, and hence cannot be rejected.
+	if ins.maxSeenPreparePropNum > args.PropNum {
+		printf("S%v rejects Accept (N=%v P=%v V=%v) from S%v to keep the promise (MAP=%v)", px.me, args.SeqNum, args.PropNum, args.Value, args.Me, ins.maxSeenPreparePropNum)
 		reply.Err = ErrRejected
 		return nil
 	}
 
-	// promise not to accept proposals with proposal numbers less than args.PropNum.
-	px.minAcceptPropNum = args.Prop.PropNum
+	// update the promise.
+	ins.maxSeenPreparePropNum = args.PropNum
+	// update the latest accepted proposal.
+	ins.maxSeenAcceptPropNum = args.PropNum
+	ins.accpetedValue = args.Value
+	ins.value = args.Value
+	// update max seen sequence number.
+	px.maybeUpdateMaxSeenSeqNum(args.SeqNum)
+	// update max seen proposal number.
+	px.maybeUpdateMaxSeenPropNum(args.PropNum)
 
-	// extend the instances array if necessary.
-	px.maybeExtendInstances(args.SeqNum)
-
-	// create the instance if necessary.
-	if px.instances[args.SeqNum] == nil {
-		px.instances[args.SeqNum] = makeInstance(args.SeqNum, args.Prop.Value, len(px.peers))
-	}
-
-	// update the highest-number accepted proposal.
-	// FIXME: Check the proposal number really goes higher.
-	px.instances[args.SeqNum].acceptedProp = args.Prop
-
-	reply.Err = OK
-	reply.SeqNum = args.SeqNum
-
-	printf("S%v accepts proposal (N=%v P=%v V=%v) from S%v", px.me, args.SeqNum, args.Prop.PropNum, args.Prop.Value, args.Me)
+	printf("S%v accepts proposal (N=%v P=%v V=%v) from S%v", px.me, args.SeqNum, args.PropNum, args.Value, args.Me)
 
 	return nil
 }
@@ -142,19 +96,18 @@ func (px *Paxos) handleAcceptReply(args *AcceptArgs, reply *AcceptReply) {
 	px.mu.Lock()
 	defer px.mu.Unlock()
 
-	// discard the reply if not the leader.
-	if px.leader != px.me {
+	ins, exist := px.instances[args.SeqNum]
+	// this paxos instance may be forgoteen, discard the reply.
+	if !exist || args.SeqNum <= px.maxForgottenSeqNum {
 		return
 	}
 
-	// discard the reply if changed proposal number.
-	if args.Prop.PropNum != px.propNum {
+	// discard the reply if we're in a different round of paxos.
+	if args.PropNum != ins.propNum {
 		return
 	}
 
-	if reply.Err == ErrRejected {
-		px.instances[args.SeqNum].rejected = true
-	} else if reply.Err == OK {
-		px.instances[args.SeqNum].acceptOK[reply.Me] = true
+	if reply.Err == OK {
+		ins.acceptOK[reply.Me] = true
 	}
 }

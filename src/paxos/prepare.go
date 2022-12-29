@@ -1,26 +1,11 @@
 package paxos
 
 import (
-	"time"
+	"sync"
 )
-
-func (px *Paxos) allocatePropNum() uint64 {
-	px.mu.Lock()
-	defer px.mu.Unlock()
-
-	newPropNum := px.propNum
-	for newPropNum <= px.propNum {
-		newPropNum = uint64(px.me) + px.roundNum*uint64(len(px.peers))
-		px.roundNum++
-	}
-	return newPropNum
-}
 
 // return true if a majority of acceptors has been prepared for this instance.
 func (px *Paxos) majorityPrepared(ins *Instance) bool {
-	px.mu.Lock()
-	defer px.mu.Unlock()
-
 	numPrepared := 0
 	for i := range px.peers {
 		if ins.prepareOK[i] {
@@ -31,127 +16,79 @@ func (px *Paxos) majorityPrepared(ins *Instance) bool {
 	return numPrepared*2 > len(px.peers)
 }
 
-func (px *Paxos) sendPrepare(peer int, ins *Instance) {
-	args := &PrepareArgs{Me: px.me, SeqNum: ins.seqNum, PropNum: px.propNum}
+func (px *Paxos) sendPrepare(peer int, ins *Instance, wg *sync.WaitGroup) {
+	args := &PrepareArgs{Me: px.me, SeqNum: ins.seqNum, PropNum: ins.propNum}
 	reply := &PrepareReply{}
 	if call(px.peers[peer], "Paxos.Prepare", args, reply) {
 		px.handlePrepareReply(args, reply)
 	} else {
 		printf("S%v failed to send Prepare to S%v", px.me, peer)
 	}
+
+	wg.Done()
 }
 
-func (px *Paxos) broadcastPrepares(ins *Instance) {
-	px.mu.Lock()
-	defer px.mu.Unlock()
+func (px *Paxos) broadcastPrepares(ins *Instance, done chan bool) {
+	wg := &sync.WaitGroup{}
+	wg.Add(len(px.peers))
 
 	for i := range px.peers {
-		if ins.prepareOK[i] {
-			continue
-		}
-
 		if i != px.me {
-			go px.sendPrepare(i, ins)
+			go px.sendPrepare(i, ins, wg)
 		} else {
 			// make a local call if the receiver is myself.
 			go func() {
-				args := &PrepareArgs{Me: px.me, SeqNum: ins.seqNum, PropNum: px.propNum}
+				args := &PrepareArgs{Me: px.me, SeqNum: ins.seqNum, PropNum: ins.propNum}
 				reply := &PrepareReply{}
 				px.Prepare(args, reply)
 				px.handlePrepareReply(args, reply)
+				wg.Done()
 			}()
 		}
 	}
-}
 
-func (px *Paxos) doPrepare(ins *Instance) {
-	// reset.
-	px.mu.Lock()
-	ins.rejected = false
-	for i := range px.peers {
-		ins.peerAcceptedProps[i] = nil
-		ins.prepareOK[i] = false
-		ins.acceptOK[i] = false
-	}
-	px.mu.Unlock()
+	// wait responses of all peers.
+	wg.Wait()
 
-	// choose a proposal number higher than the current one.
-	px.propNum = px.allocatePropNum()
-
-	printf("S%v starts doing prepare on proposal (N=%v P=%v V=%v)", px.me, ins.seqNum, px.propNum, ins.value)
-
-	for !px.isdead() {
-		if !px.isLeader() {
-			// redirect the proposal to the current leader.
-			printf("S%v starts redirecting (N=%v V=%v)", px.me, ins.seqNum, ins.value)
-			go px.redirectProposal(ins)
-			break
-		}
-
-		if px.rejected(ins) {
-			// this proposal was rejected, start a new round of proposal with a higher proposal number.
-			printf("S%v knows proposal (N=%v P=%v V=%v) was rejected", px.me, ins.seqNum, px.propNum, ins.value)
-			go px.doPrepare(ins)
-			break
-		}
-
-		if px.majorityPrepared(ins) {
-			// start the accept phase if a majority of peers have reported prepared, either by replying prepare OK or no more accepted.
-			printf("S%v knows proposal (N=%v P=%v V=%v) was prepared by a majority", px.me, ins.seqNum, px.propNum, ins.value)
-			go px.doAccept(ins)
-			break
-		}
-
-		// send Prepare to unprepared peers.
-		px.broadcastPrepares(ins)
-
-		// check their responses later.
-		time.Sleep(checkInterval)
-	}
+	done <- px.majorityPrepared(ins)
+	close(done)
 }
 
 func (px *Paxos) Prepare(args *PrepareArgs, reply *PrepareReply) error {
 	px.mu.Lock()
 	defer px.mu.Unlock()
 
+	reply.Err = OK
 	reply.Me = px.me
+	reply.MaxSeenAcceptPropNum = -1
+	reply.AcceptedValue = nil
 
-	// reject if the sender is not the current leader.
-	if args.Me != px.leader {
-		printf("S%v rejects Prepare (N=%v P=%v) coz the sender S%v is not leader", px.me, args.SeqNum, args.PropNum, args.Me)
-		reply.Err = ErrWrongLeader
-		return nil
+	ins, exist := px.instances[args.SeqNum]
+	if !exist {
+		px.instances[args.SeqNum] = makeInstance(args.SeqNum, nil, len(px.peers))
+		ins = px.instances[args.SeqNum]
 	}
 
-	// reject if violates the promise.
-	if px.minAcceptPropNum >= args.PropNum {
-		printf("S%v rejects Prepare (N=%v P=%v) from S%v to keep the promise (MAP=%v)", px.me, args.SeqNum, args.PropNum, args.Me, px.minAcceptPropNum)
+	// proposals of older rounds of paxos are rejected.
+	// if allowed to accept proposal from older rounds, then the quorum intersection property
+	// will be violated since there could exist at most one accepted value at a time, and this
+	// accepted value must be the value proposed in the last round.
+	// only such the chosen value (if any) could be preserved.
+	if ins.maxSeenPreparePropNum >= args.PropNum {
+		printf("S%v rejects Prepare (N=%v P=%v) from S%v to keep the promise (MAP=%v)", px.me, args.SeqNum, args.PropNum, args.Me, ins.maxSeenPreparePropNum)
 		reply.Err = ErrRejected
 		return nil
 	}
 
-	// promise not to accept proposals with proposal numbers less than args.PropNum.
-	px.minAcceptPropNum = args.PropNum
-
-	reply.Err = OK
-	reply.SeqNum = args.SeqNum
-	// tell the proposer the highest-number proposal this acceptor has ever accepted.
-	if args.SeqNum < len(px.instances) && px.instances[args.SeqNum] != nil {
-		ins := px.instances[args.SeqNum]
-		if ins.acceptedProp != nil {
-			reply.AcceptedProp = ins.acceptedProp
-		}
-	}
-	// check if there're no more accepted proposals with sequence numbers greater than args.SeqNum.
-	reply.NoMoreAccepted = true
-	if len(px.instances) > args.SeqNum {
-		for _, ins := range px.instances[args.SeqNum+1:] {
-			if ins != nil && ins.acceptedProp != nil {
-				reply.NoMoreAccepted = false
-				break
-			}
-		}
-	}
+	// update the promise.
+	ins.maxSeenPreparePropNum = args.PropNum
+	// tell the proposer the accepted value of the latest round of paxos this peer even known.
+	reply.MaxSeenAcceptPropNum = ins.maxSeenAcceptPropNum
+	reply.AcceptedValue = ins.accpetedValue
+	// update max seen sequence number.
+	px.maybeUpdateMaxSeenSeqNum(args.SeqNum)
+	// update max seen proposal number.
+	px.maybeUpdateMaxSeenPropNum(args.PropNum)
 
 	printf("S%v prepares for proposal (N=%v P=%v) from S%v", px.me, args.SeqNum, args.PropNum, args.Me)
 
@@ -162,21 +99,20 @@ func (px *Paxos) handlePrepareReply(args *PrepareArgs, reply *PrepareReply) {
 	px.mu.Lock()
 	defer px.mu.Unlock()
 
-	// discard the reply if not the leader.
-	if px.leader != px.me {
+	ins, exist := px.instances[args.SeqNum]
+	// this paxos instance may be forgoteen, discard the reply.
+	if !exist || args.SeqNum <= px.maxForgottenSeqNum {
 		return
 	}
 
-	// discard the reply if changed proposal number.
-	if args.PropNum != px.propNum {
+	// discard the reply if we're in a different round of paxos.
+	if args.PropNum != ins.propNum {
 		return
 	}
 
-	if reply.Err == ErrRejected {
-		px.instances[args.SeqNum].rejected = true
-	} else if reply.Err == OK {
-		px.instances[args.SeqNum].prepareOK[reply.Me] = true
-		px.instances[args.SeqNum].peerAcceptedProps[reply.Me] = reply.AcceptedProp
-		px.noMoreAccepted[reply.Me] = reply.NoMoreAccepted
+	if reply.Err == OK {
+		ins.prepareOK[reply.Me] = true
+		ins.peerMaxSeenAcceptPropNum[reply.Me] = reply.MaxSeenAcceptPropNum
+		ins.peerAcceptedValue[reply.Me] = reply.AcceptedValue
 	}
 }

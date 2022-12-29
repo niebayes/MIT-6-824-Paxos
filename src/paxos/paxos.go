@@ -30,7 +30,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
-	"time"
 )
 
 // px.Status() return values, indicating
@@ -45,12 +44,6 @@ const (
 	Forgotten      // decided but forgotten.
 )
 
-// tick interval = 100ms.
-const TickInterval = 100 * time.Millisecond
-
-// check interval = 500ms.
-const checkInterval = 500 * time.Millisecond
-
 type Paxos struct {
 	mu         sync.Mutex
 	l          net.Listener
@@ -60,31 +53,24 @@ type Paxos struct {
 	peers      []string
 	me         int // index into peers[]
 
-	// this peer believes peers[leader] is the leader.
-	leader int
-	// the last time receiving heartbeat from each peer.
-	lastHeartbeatTime []time.Time
 	// paxos instances.
-	// index: sequence number, value: paxos instance.
-	instances []*Instance
-	// current proposal number.
-	propNum uint64
-	// this peer promises not to accept any proposals with proposal numbers less than minAcceptPropNum.
-	// this value binds with the whole paxos instances, not a single one.
-	minAcceptPropNum uint64
+	// key: sequence number, value: paxos instance.
+	instances map[int]*Instance
+	// the highest proposal number this peer ever seen.
+	maxSeenPropNum int
 	// the i-th peer gets proposal numbers i, i + N, i + 2N, ... where N is len(peers), and i is the index into peers.
 	// roundNum is the factor of N.
 	// this allocation scheme ensures the uniqueness of proposal numbers for different proposers.
-	roundNum uint64
-	// if the i-th peer reported no more accepted, then the i-th slot is true.
-	noMoreAccepted []bool
+	roundNum int
 
 	// the following fields are required by lab, not by paxos.
 
-	// the highest sequence number ever passed to Done.
-	maxDoneSeqNum int
-	// instances with seq num <= truncatedSeqNum are forgotten and hence are truncated out.
-	truncatedSeqNum int
+	// the highest sequence number this peer ever seen.
+	maxSeenSeqNum int
+	// instances with seq num <= maxForgottenSeqNum are forgotten.
+	maxForgottenSeqNum int
+	// the highest sequence numbers ever passed to Done for each peer.
+	maxDoneSeqNum []int
 }
 
 // the application wants to create a paxos peer.
@@ -96,28 +82,16 @@ func Make(peers []string, me int, rpcs *rpc.Server) *Paxos {
 	px.me = me
 	px.mu = sync.Mutex{}
 
-	px.leader = px.me
-	px.lastHeartbeatTime = make([]time.Time, len(peers))
-
-	px.instances = make([]*Instance, 0)
-	px.propNum = 0
-	px.minAcceptPropNum = 0
+	px.instances = make(map[int]*Instance)
+	px.maxSeenPropNum = -1
 	px.roundNum = 0
 
-	px.noMoreAccepted = make([]bool, len(peers))
-
-	px.maxDoneSeqNum = -1
-	px.truncatedSeqNum = -1
-
-	// initially, this peer heared no heartbeats.
+	px.maxSeenSeqNum = -1
+	px.maxForgottenSeqNum = -1
+	px.maxDoneSeqNum = make([]int, len(px.peers))
 	for i := range px.peers {
-		px.lastHeartbeatTime[i] = time.Now()
+		px.maxDoneSeqNum[i] = -1
 	}
-	// wait a while so that this peer thinks it's the leader.
-	time.Sleep(2 * TickInterval)
-
-	// create a thread to tick periodically.
-	go px.tick()
 
 	if rpcs != nil {
 		// caller will create socket &c
@@ -173,17 +147,37 @@ func Make(peers []string, me int, rpcs *rpc.Server) *Paxos {
 	return px
 }
 
-func (px *Paxos) isLeader() bool {
-	px.mu.Lock()
-	defer px.mu.Unlock()
-	return px.leader == px.me
+func (px *Paxos) maybeUpdateMaxSeenSeqNum(seqNum int) {
+	if seqNum > px.maxSeenSeqNum {
+		px.maxSeenSeqNum = seqNum
+		printf("S%v updates max seen sequence number to %v", px.me, seqNum)
+	}
 }
 
-// return true if any prepare or accept for this instance was rejected.
-func (px *Paxos) rejected(ins *Instance) bool {
-	px.mu.Lock()
-	defer px.mu.Unlock()
-	return ins.rejected
+func (px *Paxos) maybeUpdateMaxDoneSeqNum(peer, seqNum int) {
+	if seqNum > px.maxDoneSeqNum[peer] {
+		px.maxDoneSeqNum[peer] = seqNum
+		// printf("S%v updates max done sequence number to %v for S%v", px.me, seqNum, peer)
+		fmt.Printf("S%v updates max done sequence number to %v for S%v\n", px.me, seqNum, peer)
+	}
+}
+
+func (px *Paxos) maybeForget(seqNum int) {
+	forgottenSeqNums := make([]int, 0)
+	for seq := range px.instances {
+		if seq <= seqNum {
+			forgottenSeqNums = append(forgottenSeqNums, seq)
+		}
+	}
+
+	for _, seq := range forgottenSeqNums {
+		delete(px.instances, seq)
+
+		if seq > px.maxForgottenSeqNum {
+			px.maxForgottenSeqNum = seqNum
+			printf("S%v forgets instances with sequence numbers <= %v", px.me, seqNum)
+		}
+	}
 }
 
 // the application wants paxos to start agreement on
@@ -195,17 +189,14 @@ func (px *Paxos) Start(seq int, v interface{}) {
 	px.mu.Lock()
 	defer px.mu.Unlock()
 
-	px.maybeExtendInstances(seq)
-
-	if px.instances[seq] == nil {
+	// start proposing the given value if the paxos instance with sequence number seq is not chosen currently.
+	ins, exist := px.instances[seq]
+	if !exist || ins.status == Pending {
 		px.instances[seq] = makeInstance(seq, v, len(px.peers))
-		if px.leader == px.me {
-			go px.doPrepare(px.instances[seq])
-		} else {
-			printf("S%v starts redirecting (N=%v V=%v)", px.me, seq, v)
-			go px.redirectProposal(px.instances[seq])
-		}
+		go px.propose(px.instances[seq])
 	}
+
+	px.maybeUpdateMaxSeenSeqNum(seq)
 }
 
 // the application wants to know whether this
@@ -217,14 +208,13 @@ func (px *Paxos) Status(seq int) (Fate, interface{}) {
 	px.mu.Lock()
 	defer px.mu.Unlock()
 
-	if len(px.instances) > seq && px.instances[seq] != nil {
-		ins := px.instances[seq]
-		if ins.status == Decided {
-			return Decided, ins.acceptedProp.Value
-		}
+	ins, exist := px.instances[seq]
+
+	if !exist || seq <= px.maxForgottenSeqNum {
+		return Forgotten, nil
 	}
 
-	return Pending, nil
+	return ins.status, ins.value
 }
 
 // the application on this machine is done with
@@ -232,6 +222,10 @@ func (px *Paxos) Status(seq int) (Fate, interface{}) {
 //
 // see the comments for Min() for more explanation.
 func (px *Paxos) Done(seq int) {
+	px.mu.Lock()
+	defer px.mu.Unlock()
+
+	px.maybeUpdateMaxDoneSeqNum(px.me, seq)
 }
 
 // the application wants to know the
@@ -240,7 +234,8 @@ func (px *Paxos) Done(seq int) {
 func (px *Paxos) Max() int {
 	px.mu.Lock()
 	defer px.mu.Unlock()
-	return len(px.instances) - 1
+
+	return px.maxSeenSeqNum
 }
 
 // Min() should return one more than the minimum among z_i,
@@ -270,7 +265,19 @@ func (px *Paxos) Max() int {
 // missed -- the other peers therefor cannot forget these
 // instances.
 func (px *Paxos) Min() int {
-	return 0
+	px.mu.Lock()
+	defer px.mu.Unlock()
+
+	minDoneSeqNum := 1 << 31
+	for i := range px.peers {
+		if px.maxDoneSeqNum[i] < minDoneSeqNum {
+			minDoneSeqNum = px.maxDoneSeqNum[i]
+		}
+	}
+
+	px.maybeForget(minDoneSeqNum)
+
+	return minDoneSeqNum + 1
 }
 
 // tell the peer to shut itself down.

@@ -9,66 +9,46 @@ import "fmt"
 type Err string
 
 const (
-	OK             = "OK"
-	ErrRejected    = "Rejected"
-	ErrWrongLeader = "WrongLeader"
+	OK          = "OK"
+	ErrRejected = "Rejected"
 )
-
-type RedirectArgs struct {
-	Me      int
-	SeqNum  int
-	Value   interface{}
-	Decided bool
-}
-
-type RedirectReply struct {
-	Err Err
-}
-
-type HeartbeatArgs struct {
-	Me         int
-	DoneSeqNum int
-}
-
-type HeartbeatReply struct {
-}
 
 type PrepareArgs struct {
 	Me      int
 	SeqNum  int
-	PropNum uint64
+	PropNum int
 }
 
 type PrepareReply struct {
-	Err            Err
-	Me             int
-	SeqNum         int
-	AcceptedProp   *Proposal
-	NoMoreAccepted bool
+	Err                  Err
+	Me                   int
+	MaxSeenAcceptPropNum int
+	AcceptedValue        interface{}
 }
 
 type AcceptArgs struct {
-	Me     int
-	SeqNum int
-	Prop   *Proposal
+	Me      int
+	SeqNum  int
+	PropNum int
+	Value   interface{}
 }
 
 type AcceptReply struct {
-	Err    Err
-	Me     int
-	SeqNum int
+	Err Err
+	Me  int
 }
 
 type DecideArgs struct {
-	Me     int
-	SeqNum int
-	Prop   *Proposal
+	Me         int
+	SeqNum     int
+	PropNum    int
+	Value      interface{}
+	DoneSeqNum int
 }
 
 type DecideReply struct {
-	Err    Err
-	Me     int
-	SeqNum int
+	Me         int
+	DoneSeqNum int
 }
 
 // call() sends an RPC to the rpcname handler on server srv
