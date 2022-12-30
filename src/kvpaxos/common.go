@@ -5,7 +5,7 @@ type Err string
 const (
 	OK       = "OK"
 	ErrNoKey = "ErrNoKey"
-	ErrOther = "ErrOther"
+	ErrRejected = "ErrRejected"
 )
 
 // Put or Append
