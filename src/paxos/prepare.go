@@ -58,16 +58,17 @@ func (px *Paxos) Prepare(args *PrepareArgs, reply *PrepareReply) error {
 	px.mu.Lock()
 	defer px.mu.Unlock()
 
+	// update max seen sequence number.
+	px.maybeUpdateMaxSeenSeqNum(args.SeqNum)
+	// update max seen proposal number.
+	px.maybeUpdateMaxSeenPropNum(args.PropNum)
+
 	reply.Err = OK
 	reply.Me = px.me
 	reply.MaxSeenAcceptPropNum = -1
 	reply.AcceptedValue = nil
 
-	ins, exist := px.instances[args.SeqNum]
-	if !exist {
-		px.instances[args.SeqNum] = makeInstance(args.SeqNum, nil, len(px.peers))
-		ins = px.instances[args.SeqNum]
-	}
+	ins := px.getInstance(args.SeqNum)
 
 	// proposals of older rounds of paxos are rejected.
 	// if allowed to accept proposal from older rounds, then the quorum intersection property
@@ -85,10 +86,6 @@ func (px *Paxos) Prepare(args *PrepareArgs, reply *PrepareReply) error {
 	// tell the proposer the accepted value of the latest round of paxos this peer even known.
 	reply.MaxSeenAcceptPropNum = ins.maxSeenAcceptPropNum
 	reply.AcceptedValue = ins.accpetedValue
-	// update max seen sequence number.
-	px.maybeUpdateMaxSeenSeqNum(args.SeqNum)
-	// update max seen proposal number.
-	px.maybeUpdateMaxSeenPropNum(args.PropNum)
 
 	printf("S%v prepares for proposal (N=%v P=%v) from S%v", px.me, args.SeqNum, args.PropNum, args.Me)
 
@@ -99,9 +96,17 @@ func (px *Paxos) handlePrepareReply(args *PrepareArgs, reply *PrepareReply) {
 	px.mu.Lock()
 	defer px.mu.Unlock()
 
-	ins, exist := px.instances[args.SeqNum]
-	// this paxos instance may be forgoteen, discard the reply.
-	if !exist || args.SeqNum <= px.maxForgottenSeqNum {
+	// update max seen proposal number.
+	px.maybeUpdateMaxSeenPropNum(reply.MaxSeenAcceptPropNum)
+
+	// discard the reply if the instance is forgotten.
+	if args.SeqNum <= px.maxForgottenSeqNum {
+		return
+	}
+
+	ins := px.getInstance(args.SeqNum)
+	// discard the reply if the instance is decided.
+	if ins.decidedValue != nil {
 		return
 	}
 

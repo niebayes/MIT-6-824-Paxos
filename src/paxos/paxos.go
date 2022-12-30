@@ -157,12 +157,13 @@ func (px *Paxos) maybeUpdateMaxSeenSeqNum(seqNum int) {
 func (px *Paxos) maybeUpdateMaxDoneSeqNum(peer, seqNum int) {
 	if seqNum > px.maxDoneSeqNum[peer] {
 		px.maxDoneSeqNum[peer] = seqNum
-		// printf("S%v updates max done sequence number to %v for S%v", px.me, seqNum, peer)
-		fmt.Printf("S%v updates max done sequence number to %v for S%v\n", px.me, seqNum, peer)
+		printf("S%v updates max done sequence number to %v for S%v", px.me, seqNum, peer)
+		// fmt.Printf("S%v updates max done sequence number to %v for S%v\n", px.me, seqNum, peer)
 	}
 }
 
 func (px *Paxos) maybeForget(seqNum int) {
+	// collect all sequence numbers that need to be forgotten.
 	forgottenSeqNums := make([]int, 0)
 	for seq := range px.instances {
 		if seq <= seqNum {
@@ -170,6 +171,7 @@ func (px *Paxos) maybeForget(seqNum int) {
 		}
 	}
 
+	// delete instance state.
 	for _, seq := range forgottenSeqNums {
 		delete(px.instances, seq)
 
@@ -189,14 +191,18 @@ func (px *Paxos) Start(seq int, v interface{}) {
 	px.mu.Lock()
 	defer px.mu.Unlock()
 
-	// start proposing the given value if the paxos instance with sequence number seq is not chosen currently.
-	ins, exist := px.instances[seq]
-	if !exist || ins.status == Pending {
-		px.instances[seq] = makeInstance(seq, v, len(px.peers))
-		go px.propose(px.instances[seq])
+	px.maybeUpdateMaxSeenSeqNum(seq)
+
+	// ignore forgotten proposals.
+	if seq <= px.maxForgottenSeqNum {
+		return
 	}
 
-	px.maybeUpdateMaxSeenSeqNum(seq)
+	// start proposing the given value if the paxos instance with sequence number seq is not chosen currently.
+	ins := px.getInstance(seq)
+	if ins.decidedValue == nil {
+		go px.propose(seq, v)
+	}
 }
 
 // the application wants to know whether this
@@ -208,13 +214,16 @@ func (px *Paxos) Status(seq int) (Fate, interface{}) {
 	px.mu.Lock()
 	defer px.mu.Unlock()
 
-	ins, exist := px.instances[seq]
-
-	if !exist || seq <= px.maxForgottenSeqNum {
+	if seq <= px.maxForgottenSeqNum {
 		return Forgotten, nil
 	}
 
-	return ins.status, ins.value
+	ins := px.getInstance(seq)
+	if ins.decidedValue == nil {
+		return Pending, nil
+	}
+
+	return Decided, ins.decidedValue
 }
 
 // the application on this machine is done with

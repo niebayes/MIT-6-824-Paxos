@@ -17,7 +17,7 @@ func (px *Paxos) majorityAccepted(ins *Instance) bool {
 }
 
 func (px *Paxos) sendAccept(peer int, ins *Instance, wg *sync.WaitGroup) {
-	args := &AcceptArgs{Me: px.me, SeqNum: ins.seqNum, PropNum: ins.propNum, Value: ins.value}
+	args := &AcceptArgs{Me: px.me, SeqNum: ins.seqNum, PropNum: ins.propNum, Value: ins.propValue}
 	reply := &AcceptReply{}
 	if call(px.peers[peer], "Paxos.Accept", args, reply) {
 		px.handleAcceptReply(args, reply)
@@ -38,7 +38,7 @@ func (px *Paxos) broadcastAccepts(ins *Instance, done chan bool) {
 		} else {
 			// make a local call if the receiver is myself.
 			go func() {
-				args := &AcceptArgs{Me: px.me, SeqNum: ins.seqNum, PropNum: ins.propNum, Value: ins.value}
+				args := &AcceptArgs{Me: px.me, SeqNum: ins.seqNum, PropNum: ins.propNum, Value: ins.propValue}
 				reply := &AcceptReply{}
 				px.Accept(args, reply)
 				px.handleAcceptReply(args, reply)
@@ -58,14 +58,15 @@ func (px *Paxos) Accept(args *AcceptArgs, reply *AcceptReply) error {
 	px.mu.Lock()
 	defer px.mu.Unlock()
 
+	// update max seen sequence number.
+	px.maybeUpdateMaxSeenSeqNum(args.SeqNum)
+	// update max seen proposal number.
+	px.maybeUpdateMaxSeenPropNum(args.PropNum)
+
 	reply.Err = OK
 	reply.Me = px.me
 
-	ins, exist := px.instances[args.SeqNum]
-	if !exist {
-		px.instances[args.SeqNum] = makeInstance(args.SeqNum, nil, len(px.peers))
-		ins = px.instances[args.SeqNum]
-	}
+	ins := px.getInstance(args.SeqNum)
 
 	// proposals of older rounds of paxos are rejected.
 	// if the proposal number equals the maxSeenPreparePropNum, this means
@@ -81,11 +82,6 @@ func (px *Paxos) Accept(args *AcceptArgs, reply *AcceptReply) error {
 	// update the latest accepted proposal.
 	ins.maxSeenAcceptPropNum = args.PropNum
 	ins.accpetedValue = args.Value
-	ins.value = args.Value
-	// update max seen sequence number.
-	px.maybeUpdateMaxSeenSeqNum(args.SeqNum)
-	// update max seen proposal number.
-	px.maybeUpdateMaxSeenPropNum(args.PropNum)
 
 	printf("S%v accepts proposal (N=%v P=%v V=%v) from S%v", px.me, args.SeqNum, args.PropNum, args.Value, args.Me)
 
@@ -96,9 +92,14 @@ func (px *Paxos) handleAcceptReply(args *AcceptArgs, reply *AcceptReply) {
 	px.mu.Lock()
 	defer px.mu.Unlock()
 
-	ins, exist := px.instances[args.SeqNum]
-	// this paxos instance may be forgoteen, discard the reply.
-	if !exist || args.SeqNum <= px.maxForgottenSeqNum {
+	// discard the reply if the instance is forgotten.
+	if args.SeqNum <= px.maxForgottenSeqNum {
+		return
+	}
+
+	ins := px.getInstance(args.SeqNum)
+	// discard the reply if the instance is decided.
+	if ins.decidedValue != nil {
 		return
 	}
 
