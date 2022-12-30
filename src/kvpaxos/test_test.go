@@ -104,7 +104,7 @@ func TestBasic(t *testing.T) {
 		for i := 0; i < nservers; i++ {
 			va[i] = cka[i].Get("b")
 			if va[i] != va[0] {
-				t.Fatalf("mismatch")
+				t.Fatalf("mismatch: va0=%v vai=%v i=%v", va[0], va[i], i)
 			}
 		}
 	}

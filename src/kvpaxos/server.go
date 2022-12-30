@@ -41,6 +41,10 @@ type KVPaxos struct {
 	db map[string]string
 	// the next free sequence number.
 	nextSeqNum int
+	// the sequence number of the next op to execute.
+	nextExecSeqNum int
+	// key: sequence number, value: the decided op.
+	decidedOps map[int]Op
 	// key: clerk id, value: true if the op with id next op id is pending to be decided.
 	hasPendingOp map[int64]bool
 	// the id of the expected next op from each clerk.
@@ -80,6 +84,8 @@ func (kv *KVPaxos) waitDecided(seqNum int) interface{} {
 }
 
 func (kv *KVPaxos) executeOp(op *Op) (Err, string) {
+	// TODO: update next op id and cached reply.
+
 	switch op.OpType {
 	case "Get":
 		value, exist := kv.db[op.Key]
@@ -90,16 +96,43 @@ func (kv *KVPaxos) executeOp(op *Op) (Err, string) {
 
 	case "Put":
 		kv.db[op.Key] = op.Value
-		return OK, ""
+		return OK, kv.db[op.Key]
 
 	case "Append":
 		kv.db[op.Key] += op.Value
-		return OK, ""
+		return OK, kv.db[op.Key]
 
 	default:
 		log.Fatalf("unexpected op type %v", op.OpType)
 	}
 	return "", ""
+}
+
+func (kv *KVPaxos) executeOpsBefore(seqNum int) {
+	for kv.nextExecSeqNum < seqNum {
+		op, decided := kv.decidedOps[kv.nextExecSeqNum]
+		if decided {
+			kv.executeOp(&op)
+			kv.nextExecSeqNum++
+		} else {
+			break
+		}
+	}
+}
+
+func (kv *KVPaxos) doneOpsUntil(seqNum int) {
+	kv.px.Done(seqNum)
+
+	doneSeqNums := make([]int, 0)
+	for seq := range kv.decidedOps {
+		if seq <= seqNum {
+			doneSeqNums = append(doneSeqNums, seq)
+		}
+	}
+
+	for _, seq := range doneSeqNums {
+		delete(kv.decidedOps, seq)
+	}
 }
 
 func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
@@ -110,6 +143,7 @@ func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
 	// reject ahead requests.
 	if args.OpId > expectedOpId {
 		printf("S%v rejects ahead Get (Id=%v K=%v) from C%v", kv.me, args.OpId, args.Key, args.ClerkId)
+		printf("expectedOpId = %v argsOpId = %v", expectedOpId, args.OpId)
 		reply.Err = ErrRejected
 		kv.mu.Unlock()
 		return nil
@@ -157,13 +191,22 @@ func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
 
 		// start proposing the op and wait it to be decided
 		propOp := Op{ClerkId: args.ClerkId, OpId: args.OpId, OpType: "Get", Key: args.Key, Value: ""}
+		printf("S%v starts proposing op (N=%v Id=%v T=%v K=%v V=%v) from C%v", kv.me, seqNum, propOp.OpId, propOp.OpType, propOp.Key, propOp.Value, propOp.ClerkId)
 		kv.px.Start(seqNum, propOp)
 		decidedOp := kv.waitDecided(seqNum).(Op)
 
-		// execute this op whatsoever.
+		// execute this op if all ops before it are executed.
 		kv.mu.Lock()
+		kv.decidedOps[seqNum] = decidedOp
+		kv.executeOpsBefore(seqNum)
+		if kv.nextExecSeqNum != seqNum {
+			kv.mu.Unlock()
+			continue
+		}
 		err, value := kv.executeOp(&decidedOp)
-		printf("S%v executes op (N=%v Id=%v T=%v K=%v V=%v) from C%v", kv.me, seqNum, decidedOp.OpId, decidedOp.OpType, decidedOp.Key, decidedOp.Value, decidedOp.ClerkId)
+		kv.nextExecSeqNum++
+		kv.doneOpsUntil(seqNum)
+		printf("S%v executes op (N=%v Id=%v T=%v K=%v V=%v E=%v RV=%v) from C%v", kv.me, seqNum, decidedOp.OpId, decidedOp.OpType, decidedOp.Key, decidedOp.Value, err, value, decidedOp.ClerkId)
 
 		if propOp.ClerkId == decidedOp.ClerkId && propOp.OpId == decidedOp.OpId {
 			// the latest executed op is our op, set reply and update server state.
@@ -173,6 +216,7 @@ func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
 			kv.hasPendingOp[args.ClerkId] = false
 			kv.lastOpReply[args.ClerkId] = Reply{opType: "Get", getReply: reply}
 			kv.nextOpId[args.ClerkId] = args.OpId + 1
+			printf("S%v updates nextOpId for C%v to %v", kv.me, args.ClerkId, args.OpId+1)
 			kv.mu.Unlock()
 
 			break
@@ -193,6 +237,7 @@ func (kv *KVPaxos) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error {
 	// reject ahead requests.
 	if args.OpId > expectedOpId {
 		printf("S%v rejects ahead PutAppend (Id=%v T=%v K=%v V=%v) from C%v", kv.me, args.OpId, args.OpType, args.Key, args.Value, args.ClerkId)
+		printf("expectedOpId = %v argsOpId = %v", expectedOpId, args.OpId)
 		reply.Err = ErrRejected
 		kv.mu.Unlock()
 		return nil
@@ -239,21 +284,31 @@ func (kv *KVPaxos) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error {
 
 		// start proposing the op and wait it to be decided
 		propOp := Op{ClerkId: args.ClerkId, OpId: args.OpId, OpType: args.OpType, Key: args.Key, Value: args.Value}
+		printf("S%v starts proposing op (N=%v Id=%v T=%v K=%v V=%v) from C%v", kv.me, seqNum, propOp.OpId, propOp.OpType, propOp.Key, propOp.Value, propOp.ClerkId)
 		kv.px.Start(seqNum, propOp)
 		decidedOp := kv.waitDecided(seqNum).(Op)
 
 		// execute this op whatsoever.
 		kv.mu.Lock()
-		err, _ := kv.executeOp(&decidedOp)
-		printf("S%v executes op (N=%v Id=%v T=%v K=%v V=%v) from C%v", kv.me, seqNum, decidedOp.OpId, decidedOp.OpType, decidedOp.Key, decidedOp.Value, decidedOp.ClerkId)
+		kv.decidedOps[seqNum] = decidedOp
+		kv.executeOpsBefore(seqNum)
+		if kv.nextExecSeqNum != seqNum {
+			kv.mu.Unlock()
+			continue
+		}
+		err, value := kv.executeOp(&decidedOp)
+		kv.nextExecSeqNum++
+		kv.doneOpsUntil(seqNum)
+		printf("S%v executes op (N=%v Id=%v T=%v K=%v V=%v E=%v RV=%v) from C%v", kv.me, seqNum, decidedOp.OpId, decidedOp.OpType, decidedOp.Key, decidedOp.Value, err, value, decidedOp.ClerkId)
 
-		if propOp.ClerkId == decidedOp.ClerkId && propOp.OpId == decidedOp.OpId {
+		if args.ClerkId == decidedOp.ClerkId && args.OpId == decidedOp.OpId {
 			// the latest executed op is our op, set reply and update server state.
 			reply.Err = err
 
 			kv.hasPendingOp[args.ClerkId] = false
 			kv.lastOpReply[args.ClerkId] = Reply{opType: args.OpType, putAppendReply: reply}
 			kv.nextOpId[args.ClerkId] = args.OpId + 1
+			printf("S%v updates nextOpId for C%v to %v", kv.me, args.ClerkId, args.OpId+1)
 			kv.mu.Unlock()
 
 			break
@@ -305,6 +360,8 @@ func StartServer(servers []string, me int) *KVPaxos {
 	kv.mu = sync.Mutex{}
 	kv.db = make(map[string]string)
 	kv.nextSeqNum = 0
+	kv.nextExecSeqNum = 0
+	kv.decidedOps = make(map[int]Op)
 	kv.hasPendingOp = make(map[int64]bool)
 	kv.nextOpId = make(map[int64]int)
 	kv.lastOpReply = make(map[int64]Reply)

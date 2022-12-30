@@ -4,7 +4,7 @@ import (
 	"fmt"
 )
 
-const DEBUG = false
+const DEBUG = true
 
 func printf(format string, a ...interface{}) {
 	// print iff debug is set.

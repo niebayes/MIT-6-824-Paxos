@@ -72,6 +72,8 @@ func (ck *Clerk) Get(key string) string {
 			}
 			ck.lastAliveServerId = serverId
 
+			printf("C%v receives reply %v from S%v", ck.clerkId, reply.Err, serverId)
+
 			if reply.Err == OK || reply.Err == ErrNoKey {
 				return reply.Value
 			}
@@ -105,6 +107,8 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 				continue
 			}
 			ck.lastAliveServerId = serverId
+
+			printf("C%v receives reply %v from S%v", ck.clerkId, reply.Err, serverId)
 
 			if reply.Err == OK {
 				return
