@@ -158,7 +158,6 @@ func (px *Paxos) maybeUpdateMaxDoneSeqNum(peer, seqNum int) {
 	if seqNum > px.maxDoneSeqNum[peer] {
 		px.maxDoneSeqNum[peer] = seqNum
 		printf("S%v updates max done sequence number to %v for S%v", px.me, seqNum, peer)
-		// fmt.Printf("S%v updates max done sequence number to %v for S%v\n", px.me, seqNum, peer)
 	}
 }
 
@@ -198,9 +197,11 @@ func (px *Paxos) Start(seq int, v interface{}) {
 		return
 	}
 
-	// start proposing the given value if the paxos instance with sequence number seq is not chosen currently.
+	// start proposing the value if this paxos instance is not decided
+	// and there's no goroutine being proposing this paxos instance.
 	ins := px.getInstance(seq)
-	if ins.decidedValue == nil {
+	if ins.decidedValue == nil && !ins.proposing {
+		ins.proposing = true
 		go px.propose(seq, v)
 	}
 }

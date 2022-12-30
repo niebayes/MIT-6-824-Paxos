@@ -2,6 +2,8 @@ package paxos
 
 import "time"
 
+const backoffFactor = 2
+const maxSleepTime = 300 * time.Millisecond
 const proposeTimeout = 1 * time.Second
 
 func (px *Paxos) maybeUpdateMaxSeenPropNum(propNum int) {
@@ -40,7 +42,8 @@ func (px *Paxos) choosePropNum() int {
 func (px *Paxos) choosePropValue(ins *Instance) {
 	maxPropNum := -1
 	for i := range px.peers {
-		if i != px.me && ins.prepareOK[i] && ins.peerMaxSeenAcceptPropNum[i] > maxPropNum && ins.peerAcceptedValue[i] != nil {
+		// warning, must consider the accepted proposal of our own since this value comes from others and it might be decided.
+		if ins.prepareOK[i] && ins.peerMaxSeenAcceptPropNum[i] > maxPropNum && ins.peerAcceptedValue[i] != nil {
 			maxPropNum = ins.peerMaxSeenAcceptPropNum[i]
 			ins.propValue = ins.peerAcceptedValue[i]
 		}
@@ -53,8 +56,24 @@ func (px *Paxos) pending(seqNum int) bool {
 }
 
 func (px *Paxos) propose(seqNum int, value interface{}) {
+	// true if this the first try on proposing this instance.
+	first := true
+	lastSleepTime := 25 * time.Millisecond
+
 	// continue proposing the value if this paxos instance is pending, i.e. not decided or forgotten.
 	for !px.isdead() && px.pending(seqNum) {
+		// backoff to not start a new round of proposal immediately.
+		// this may give another peer proposing the same instance more chance to decide the value.
+		// and hence the total RPC count could be reduced.
+		if !first {
+			sleepTime := lastSleepTime * backoffFactor
+			if sleepTime > maxSleepTime {
+				sleepTime = maxSleepTime
+			}
+			time.Sleep(sleepTime)
+		}
+		first = false
+
 		px.mu.Lock()
 		ins := px.getInstance(seqNum)
 		px.resetInstance(ins, value)
@@ -106,14 +125,14 @@ func (px *Paxos) propose(seqNum int, value interface{}) {
 		// set decided.
 		px.mu.Lock()
 		ins.decidedValue = ins.propValue
+		ins.proposing = false
+		printf("S%v finishes proposal (N=%v P=%v V=%v)", px.me, ins.seqNum, ins.propNum, ins.decidedValue)
 		px.mu.Unlock()
 
 		// broadcast decides to all peers.
 		// if some peers are deaf currently, we leave them as they are.
 		// the next round of paxos on the same sequence number will notify these peers.
 		go px.broadcastDecides(ins)
-
-		printf("S%v finishes proposal (N=%v P=%v V=%v)", px.me, ins.seqNum, ins.propNum, ins.decidedValue)
 		break
 	}
 }

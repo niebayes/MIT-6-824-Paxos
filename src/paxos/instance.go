@@ -1,20 +1,21 @@
 package paxos
 
 type Instance struct {
-	seqNum int // sequence number.
+	proposing bool // true if this peer is proposing this instance.
+	seqNum    int  // sequence number.
 
 	// proposer fields.
-	propNum                  int         // current proposal number.
-	propValue                interface{} // value to propose.
-	peerMaxSeenAcceptPropNum []int
-	peerAcceptedValue        []interface{}
-	prepareOK                []bool
-	acceptOK                 []bool
+	propNum                  int           // current proposal number.
+	propValue                interface{}   // value to propose.
+	peerMaxSeenAcceptPropNum []int         // peers seen highest proposal number conveyed in Accepts.
+	peerAcceptedValue        []interface{} // peers latest accepted value.
+	prepareOK                []bool        // true if the i-th peer has replied prepare OK.
+	acceptOK                 []bool        // true if the i-th peer has replied accept OK.
 
 	// acceptor fields.
-	maxSeenPreparePropNum int
-	maxSeenAcceptPropNum  int
-	accpetedValue         interface{}
+	maxSeenPreparePropNum int         // the highest proposal number this peer ever seen in Prepares.
+	maxSeenAcceptPropNum  int         // the highest proposal number this peer ever seen in Accepts.
+	accpetedValue         interface{} // this peer's latest accepted value.
 
 	// learner fields.
 	decidedValue interface{} // decided value (if any).
@@ -22,7 +23,8 @@ type Instance struct {
 
 func makeInstance(seqNum int, value interface{}, numPeers int) *Instance {
 	ins := &Instance{
-		seqNum: seqNum,
+		proposing: false,
+		seqNum:    seqNum,
 
 		// proposer fields.
 		propNum:                  -1,
