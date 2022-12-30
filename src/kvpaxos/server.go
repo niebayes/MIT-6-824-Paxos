@@ -12,16 +12,9 @@ import "syscall"
 import "encoding/gob"
 import "math/rand"
 
-const Debug = 0
-
-func DPrintf(format string, a ...interface{}) (n int, err error) {
-	if Debug > 0 {
-		log.Printf(format, a...)
-	}
-	return
-}
-
 type Op struct {
+	ClerkId int64
+	OpId    int
 }
 
 type KVPaxos struct {
@@ -44,7 +37,6 @@ func (kv *KVPaxos) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error {
 // tell the server to shut itself down.
 // please do not change these two functions.
 func (kv *KVPaxos) kill() {
-	DPrintf("Kill(%d): die\n", kv.me)
 	atomic.StoreInt32(&kv.dead, 1)
 	kv.l.Close()
 	kv.px.Kill()

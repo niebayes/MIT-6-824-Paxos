@@ -1,17 +1,20 @@
 package kvpaxos
 
+type Err string
+
 const (
 	OK       = "OK"
 	ErrNoKey = "ErrNoKey"
+	ErrOther = "ErrOther"
 )
-
-type Err string
 
 // Put or Append
 type PutAppendArgs struct {
-	Key   string
-	Value string
-	Op    string // "Put" or "Append"
+	ClerkId int64
+	OpId    int
+	OpType  string // "Put" or "Append"
+	Key     string
+	Value   string
 }
 
 type PutAppendReply struct {
@@ -19,7 +22,9 @@ type PutAppendReply struct {
 }
 
 type GetArgs struct {
-	Key string
+	ClerkId int64
+	OpId    int
+	Key     string
 }
 
 type GetReply struct {
