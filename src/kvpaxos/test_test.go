@@ -371,6 +371,7 @@ func TestUnreliable(t *testing.T) {
 
 	for i := 0; i < nservers; i++ {
 		kvh[i] = port("un", i)
+		fmt.Printf("S%v = %v\n", i, kvh[i])
 	}
 	for i := 0; i < nservers; i++ {
 		kva[i] = StartServer(kvh, i)
@@ -416,11 +417,11 @@ func TestUnreliable(t *testing.T) {
 				myck.Append(key, "2")
 				vv = NextValue(vv, "2")
 				time.Sleep(100 * time.Millisecond)
-				if myck.Get(key) != vv {
-					t.Fatalf("wrong value")
+				if got := myck.Get(key); got != vv {
+					t.Fatalf("wrong value. K=%v got=%v expected=%v", key, got, vv)
 				}
-				if myck.Get(key) != vv {
-					t.Fatalf("wrong value")
+				if got := myck.Get(key); got != vv {
+					t.Fatalf("wrong value. K=%v got=%v expected=%v", key, got, vv)
 				}
 				ok = true
 			}(cli)

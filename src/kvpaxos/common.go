@@ -3,9 +3,11 @@ package kvpaxos
 type Err string
 
 const (
-	OK       = "OK"
-	ErrNoKey = "ErrNoKey"
-	ErrRejected = "ErrRejected"
+	OK             = "OK"
+	ErrNoKey       = "ErrNoKey"
+	ErrRejected    = "ErrRejected"
+	ErrNotDecided  = "ErrNotDecided"
+	ErrNotExecuted = "ErrNotExecuted"
 )
 
 // Put or Append
