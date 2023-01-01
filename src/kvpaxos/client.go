@@ -11,7 +11,6 @@ import (
 // backoff params.
 const backoffFactor = 2
 const initWaitTime = 25 * time.Millisecond
-
 // const maxWaitTime = 1 * time.Second
 const maxWaitTime = 500 * time.Millisecond
 
