@@ -236,6 +236,15 @@ func (px *Paxos) Done(seq int) {
 	defer px.mu.Unlock()
 
 	px.maybeUpdateMaxDoneSeqNum(px.me, seq)
+
+	minDoneSeqNum := 1 << 31
+	for i := range px.peers {
+		if px.maxDoneSeqNum[i] < minDoneSeqNum {
+			minDoneSeqNum = px.maxDoneSeqNum[i]
+		}
+	}
+
+	px.maybeForget(minDoneSeqNum)
 }
 
 // the application wants to know the

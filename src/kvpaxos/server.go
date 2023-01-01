@@ -127,9 +127,14 @@ func (kv *KVPaxos) executeOp(op *Op) (Err, string) {
 		kv.db[op.Key] += op.Value
 		return OK, kv.db[op.Key]
 
+	case "NoOp":
+		// FIXME: Shall not happen.
+		return OK, ""
+
 	default:
 		log.Fatalf("unexpected op type %v", op.OpType)
 	}
+
 	return "", ""
 }
 
@@ -138,6 +143,7 @@ func (kv *KVPaxos) executeOpsUntil(seqNum int) {
 		op, decided := kv.decidedOps[kv.nextExecSeqNum]
 		if decided {
 			err, value := kv.executeOp(&op)
+			printf("S%v executes op (C=%v Id=%v T=%v K=%v V=%v) at N=%v", kv.me, op.ClerkId, op.OpId, op.OpType, op.Key, op.Value, seqNum)
 			kv.doneOpsUntil(kv.nextExecSeqNum)
 			kv.nextExecSeqNum++
 			printf("S%v updates nextExecSeqNum to %v", kv.me, kv.nextExecSeqNum)
@@ -155,7 +161,7 @@ func (kv *KVPaxos) executeOpsUntil(seqNum int) {
 				reply.putAppendReply = &PutAppendReply{Err: err}
 			}
 			kv.lastOpReply[op.ClerkId] = reply
-			printf("S%v caches the reply for op (C=%v Id=%v T=%v K=%v V=%v)", kv.me, op.ClerkId, op.OpId, op.OpType, op.Value, op.Value)
+			printf("S%v caches the reply for op (C=%v Id=%v T=%v K=%v V=%v)", kv.me, op.ClerkId, op.OpId, op.OpType, op.Key, op.Value)
 
 		} else {
 			break
@@ -205,19 +211,20 @@ func (kv *KVPaxos) propose(op *Op) {
 		seqNum := kv.allocateSeqNum()
 		// starts proposing the op at this sequence number.
 		kv.px.Start(seqNum, *op)
+		printf("S%v starts proposing op (C=%v Id=%v T=%v K=%v V=%v) at N=%v", kv.me, op.ClerkId, op.OpId, op.OpType, op.Key, op.Value, seqNum)
 		// wait until the paxos instance with this sequence number is decided.
 		decidedOp := kv.waitDecided(seqNum).(Op)
-		printf("S%v knows op (C=%v Id=%v T=%v K=%v V=%v) is decided at sequence number %v", kv.me, decidedOp.ClerkId, decidedOp.OpId, decidedOp.OpType, decidedOp.Key, decidedOp.Value, seqNum)
+		printf("S%v knows op (C=%v Id=%v T=%v K=%v V=%v) is decided at N=%v", kv.me, decidedOp.ClerkId, decidedOp.OpId, decidedOp.OpType, decidedOp.Key, decidedOp.Value, seqNum)
 
 		// store the decided op.
 		kv.mu.Lock()
 		kv.decidedOps[seqNum] = decidedOp
-		chosenSeqNumOfClerk, ok := kv.opChosenSeqNum[op.ClerkId]
+		chosenSeqNumOfClerk, ok := kv.opChosenSeqNum[decidedOp.ClerkId]
 		if !ok {
-			kv.opChosenSeqNum[op.ClerkId] = make(map[int]int)
-			chosenSeqNumOfClerk = kv.opChosenSeqNum[op.ClerkId]
+			kv.opChosenSeqNum[decidedOp.ClerkId] = make(map[int]int)
+			chosenSeqNumOfClerk = kv.opChosenSeqNum[decidedOp.ClerkId]
 		}
-		chosenSeqNumOfClerk[op.OpId] = seqNum
+		chosenSeqNumOfClerk[decidedOp.OpId] = seqNum
 
 		// try to executes ops until the decided op.
 		kv.executeOpsUntil(seqNum)
@@ -242,29 +249,6 @@ func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
 
 	printf("S%v receives Get (Id=%v K=%v) from C%v", kv.me, args.OpId, args.Key, args.ClerkId)
 
-	// the id of the expected next op from each clerk.
-	// given an op with op id opId from the clerk with clerk id clerkId.
-	// there're following possible cases:
-	// (1) opId < nextOpId: this op must have been executed by this server.
-	// (1-a) opId < nextOpId - 1: the clerk must have received the reply for the op. Server simply discards the request.
-	// (1-b) opId == nextOpId - 1: the clerk may not have received the reply for the op. Server replies with the cached reply.
-	// (2) opId > nextOpId: the clerk may have received the reply for the op from some other server, and this server lags behind.
-	//                      to catch up, this server needs to propose a no-op and then it will find some decided ops which may include this op.
-	// (3) opId == nextOpId:
-	// (3-a) this is the first time the server receives the op.
-	//       server chooses a sequence number for the op and starts proposing the op at this sequence number.
-	//       server replies immediately with ErrNotDecided and the clerk will wait a while and send the same request later to check if the op is decided.
-	// (3-b) this is not the first time the server receives the op.
-	//       server knows the op is not decided.
-	//       server replies immediately with ErrNotDecided and the clerk will wait a while and send the same request later to check if the op is decided.
-	// (3-c) this is not the first time the server receieves the op.
-	//       server knows the op is decided, i.e. chosen as the value at some sequence number.
-	//       however, ops before this sequence number are not executed yet in this server.
-	//       server will try to execute ops before this op according to the chosen sequence number.
-	//       if fails, server replies immediately with ErrNotExecuted and the clerk will wait a while and send the same request later to check if the op is executed.
-	//       the next time server receives the same request, will run into the case (1), aka. opId < nextOpId since the op is executed and the nextOpId is incremented.
-	//       if succeeds, server replies with the execution result.
-
 	nextOpId := kv.nextOpId[args.ClerkId]
 
 	// reject stale requests.
@@ -277,7 +261,7 @@ func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
 	// try to reply the last executed op with the cached reply.
 	if args.OpId == nextOpId-1 {
 		lastReply, exist := kv.lastOpReply[args.ClerkId]
-		if !exist {
+		if !exist || lastReply.getReply == nil {
 			log.Fatalf("S%v failed to fetch the cached reply", kv.me)
 		}
 		reply.Err = lastReply.getReply.Err
@@ -310,6 +294,10 @@ func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
 			// FIXME: Shall I execute asyncly?
 			kv.executeOpsUntil(chosenSeqNum)
 			if kv.nextExecSeqNum == chosenSeqNum+1 {
+				lastReply, exist := kv.lastOpReply[args.ClerkId]
+				if !exist || lastReply.getReply == nil {
+					log.Fatalf("S%v lastReply shall exist for op (C=%v N=%v Id=%v T=%v K=%v V=%v)", kv.me, args.ClerkId, chosenSeqNum, args.OpId, "Get", args.Key, "")
+				}
 				reply.Err = kv.lastOpReply[args.ClerkId].getReply.Err
 				reply.Value = kv.lastOpReply[args.ClerkId].getReply.Value
 				return nil
@@ -345,7 +333,7 @@ func (kv *KVPaxos) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error {
 	// try to reply the last executed op with the cached reply.
 	if args.OpId == nextOpId-1 {
 		lastReply, exist := kv.lastOpReply[args.ClerkId]
-		if !exist {
+		if !exist || lastReply.putAppendReply == nil {
 			log.Fatalf("S%v failed to fetch the cached reply", kv.me)
 		}
 		reply.Err = lastReply.putAppendReply.Err
@@ -377,6 +365,10 @@ func (kv *KVPaxos) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error {
 			// FIXME: Shall I execute asyncly?
 			kv.executeOpsUntil(chosenSeqNum)
 			if kv.nextExecSeqNum == chosenSeqNum+1 {
+				lastReply, exist := kv.lastOpReply[args.ClerkId]
+				if !exist || lastReply.putAppendReply == nil {
+					log.Fatalf("S%v lastReply shall exist for op (C=%v N=%v Id=%v T=%v K=%v V=%v)", kv.me, args.ClerkId, chosenSeqNum, args.OpId, args.OpType, args.Key, args.OpType)
+				}
 				reply.Err = kv.lastOpReply[args.ClerkId].putAppendReply.Err
 				return nil
 			}
