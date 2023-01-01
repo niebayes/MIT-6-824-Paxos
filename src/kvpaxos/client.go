@@ -11,6 +11,7 @@ import (
 // backoff params.
 const backoffFactor = 2
 const initWaitTime = 25 * time.Millisecond
+
 // const maxWaitTime = 1 * time.Second
 const maxWaitTime = 500 * time.Millisecond
 
@@ -74,7 +75,7 @@ func (ck *Clerk) Get(key string) string {
 			ck.lastAliveServerId = serverId
 			printf("C%v receives Get reply (Id=%v E=%v K=%v V=%v) from S%v", ck.clerkId, args.OpId, reply.Err, args.Key, reply.Value, ck.servers[serverId])
 
-			if reply.Err == OK || reply.Err == ErrNoKey {
+			if reply.Err == OK {
 				return reply.Value
 			}
 

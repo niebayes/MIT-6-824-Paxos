@@ -4,9 +4,6 @@ type Err string
 
 const (
 	OK             = "OK"
-	ErrNoKey       = "ErrNoKey"
-	ErrRejected    = "ErrRejected"
-	ErrNotDecided  = "ErrNotDecided"
 	ErrNotExecuted = "ErrNotExecuted"
 )
 

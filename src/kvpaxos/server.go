@@ -105,7 +105,13 @@ func (kv *KVPaxos) executor() {
 		op, decided := kv.decidedOps[kv.nextExecSeqNum]
 		if decided {
 			// execute the decided op.
-			kv.executeOp(&op)
+			if opId, exist := kv.maxExecOpIdOfClerk[op.ClerkId]; !exist || opId < op.OpId {
+				// FIXME: update server state when knows decided.
+				kv.executeOp(&op)
+				printf("S%v executes op (C=%v Id=%v) at N=%v", kv.me, op.ClerkId, op.OpId, kv.nextExecSeqNum)
+			}
+			// kv.executeOp(&op)
+			// printf("S%v executes op (C=%v Id=%v) at N=%v", kv.me, op.ClerkId, op.OpId, kv.nextExecSeqNum)
 
 			// tell the paxos peer that this op is done.
 			kv.px.Done(kv.nextExecSeqNum)
@@ -125,6 +131,8 @@ func (kv *KVPaxos) executor() {
 				kv.maxRecvOpIdFromClerk[op.ClerkId] = op.OpId
 			}
 
+			printf("S%v state (ASN=%v ESN=%v C=%v RId=%v EId=%v)", kv.me, kv.nextAllocSeqNum, kv.nextExecSeqNum, op.ClerkId, kv.maxRecvOpIdFromClerk[op.ClerkId], kv.maxExecOpIdOfClerk[op.ClerkId])
+
 		} else {
 			kv.hasNewDecidedOp.Wait()
 		}
@@ -139,15 +147,18 @@ func (kv *KVPaxos) propose(op *Op) {
 
 		// starts proposing the op at this sequence number.
 		kv.px.Start(seqNum, *op)
-		printf("S%v starts proposing op (C=%v Id=%v T=%v K=%v V=%v) at N=%v", kv.me, op.ClerkId, op.OpId, op.OpType, op.Key, op.Value, seqNum)
+		printf("S%v starts proposing op (C=%v Id=%v) at N=%v", kv.me, op.ClerkId, op.OpId, seqNum)
 
 		// wait until the paxos instance with this sequence number is decided.
 		decidedOp := kv.waitDecided(seqNum).(Op)
-		printf("S%v knows op (C=%v Id=%v T=%v K=%v V=%v) is decided at N=%v", kv.me, decidedOp.ClerkId, decidedOp.OpId, decidedOp.OpType, decidedOp.Key, decidedOp.Value, seqNum)
+		printf("S%v knows op (C=%v Id=%v) is decided at N=%v", kv.me, decidedOp.ClerkId, decidedOp.OpId, seqNum)
 
 		// store the decided op.
 		kv.mu.Lock()
 		kv.decidedOps[seqNum] = decidedOp
+		// if opId, exist := kv.maxRecvOpIdFromClerk[decidedOp.ClerkId]; !exist || opId < decidedOp.OpId {
+		// 	kv.maxRecvOpIdFromClerk[op.ClerkId] = decidedOp.OpId
+		// }
 
 		// notify the executor thread.
 		kv.hasNewDecidedOp.Signal()
@@ -155,7 +166,7 @@ func (kv *KVPaxos) propose(op *Op) {
 		// it's our op chosen as the decided value at sequence number seqNum.
 		if decidedOp.ClerkId == op.ClerkId && decidedOp.OpId == op.OpId {
 			// end proposing.
-			printf("S%v ends proposing (C=%v Id=%v T=%v K=%v V=%v)", kv.me, decidedOp.ClerkId, decidedOp.OpId, decidedOp.OpType, decidedOp.Key, decidedOp.Value)
+			printf("S%v ends proposing (C=%v Id=%v)", kv.me, decidedOp.ClerkId, decidedOp.OpId)
 			kv.mu.Unlock()
 			return
 		}
@@ -169,11 +180,12 @@ func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 
-	printf("S%v receives Get (C=%v Id=%v K=%v)", kv.me, args.ClerkId, args.OpId, args.Key)
+	printf("S%v receives Get (C=%v Id=%v)", kv.me, args.ClerkId, args.OpId)
 
 	// check if this is a dup request.
 	isDup := false
 	if opId, exist := kv.maxRecvOpIdFromClerk[args.ClerkId]; exist && opId >= args.OpId {
+		printf("S%v knows Get (C=%v Id=%v) is dup", kv.me, args.ClerkId, args.OpId)
 		isDup = true
 	}
 
@@ -181,6 +193,7 @@ func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
 		// this dup request was executed, fetch the value.
 		if opId, exist := kv.maxExecOpIdOfClerk[args.ClerkId]; exist && opId >= args.OpId {
 			// simply return OK whatsoever since the clerk is able to differentiate between OK and ErrNoKey from the value.
+			printf("S%v replies Get (C=%v Id=%v)", kv.me, args.ClerkId, args.OpId)
 			reply.Err = OK
 			reply.Value = kv.db[args.Key]
 			return nil
@@ -209,17 +222,19 @@ func (kv *KVPaxos) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 
-	printf("S%v receives PutAppend (Id=%v T=%v K=%v V=%v) from C%v", kv.me, args.OpId, args.OpType, args.Key, args.Value, args.ClerkId)
+	printf("S%v receives PutAppend (C=%v Id=%v)", kv.me, args.ClerkId, args.OpId)
 
 	// check if this is a dup request.
 	isDup := false
 	if opId, exist := kv.maxRecvOpIdFromClerk[args.ClerkId]; exist && opId >= args.OpId {
+		printf("S%v knows PutAppend (C=%v Id=%v) is dup", kv.me, args.ClerkId, args.OpId)
 		isDup = true
 	}
 
 	if isDup {
 		// this dup request was executed, simply return OK.
 		if opId, exist := kv.maxExecOpIdOfClerk[args.ClerkId]; exist && opId >= args.OpId {
+			printf("S%v replies PutAppend (C=%v Id=%v)", kv.me, args.ClerkId, args.OpId)
 			reply.Err = OK
 			return nil
 		}
