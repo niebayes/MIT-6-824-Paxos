@@ -11,8 +11,6 @@ import (
 // backoff params.
 const backoffFactor = 2
 const initWaitTime = 25 * time.Millisecond
-
-// const maxWaitTime = 1 * time.Second
 const maxWaitTime = 500 * time.Millisecond
 
 type Clerk struct {
@@ -24,7 +22,7 @@ type Clerk struct {
 	// this id is generated from nrand on init.
 	// we assume the clerk ids of different clerks will not collide so that the paxos servers could
 	// differentiate between clerks.
-	// this and the subsequent nextOpId are used to detect duplicate requests and
+	// this and the subsequent nextOpId are used for the server to detect duplicate requests and
 	// to ensure the at-most-once semantics.
 	clerkId int64
 	// the next operation id to allocate.

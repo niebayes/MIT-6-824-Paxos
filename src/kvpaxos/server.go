@@ -17,8 +17,6 @@ import (
 )
 
 const initSleepTime = 10 * time.Millisecond
-
-// const maxSleepTime = 1 * time.Second
 const maxSleepTime = 500 * time.Millisecond
 
 type Op struct {
@@ -48,7 +46,7 @@ type KVPaxos struct {
 	// the maximum op id of the executed ops of each clerk.
 	// any op with op id less than the max id won't be executed.
 	maxExecOpIdOfClerk map[int64]int
-	// all decided ops this server knows.
+	// all decided ops this server knows of.
 	// key: sequence number, value: the decided op.
 	decidedOps map[int]Op
 	// to notify the executor that there's a new decided op.
@@ -72,6 +70,8 @@ func (kv *KVPaxos) waitUntilDecided(seqNum int) interface{} {
 		status, decidedValue := kv.px.Status(seqNum)
 		if status != paxos.Pending {
 			// if forgotten, decidedValue will be nil.
+			// but this shall not happen since this value is forgotten only after
+			// this server has called Done on this value.
 			return decidedValue
 		}
 
