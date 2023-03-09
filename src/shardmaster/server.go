@@ -5,7 +5,7 @@ import "fmt"
 import "net/rpc"
 import "log"
 
-import "paxos"
+import "6.824/src/paxos"
 import "sync"
 import "sync/atomic"
 import "os"
@@ -24,11 +24,9 @@ type ShardMaster struct {
 	configs []Config // indexed by config num
 }
 
-
 type Op struct {
 	// Your data here.
 }
-
 
 func (sm *ShardMaster) Join(args *JoinArgs, reply *JoinReply) error {
 	// Your code here.
@@ -79,12 +77,10 @@ func (sm *ShardMaster) isunreliable() bool {
 	return atomic.LoadInt32(&sm.unreliable) != 0
 }
 
-//
 // servers[] contains the ports of the set of
 // servers that will cooperate via Paxos to
 // form the fault-tolerant shardmaster service.
 // me is the index of the current server in servers[].
-//
 func StartServer(servers []string, me int) *ShardMaster {
 	sm := new(ShardMaster)
 	sm.me = me

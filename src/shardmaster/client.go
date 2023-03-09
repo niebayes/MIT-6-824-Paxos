@@ -2,24 +2,41 @@ package shardmaster
 
 //
 // Shardmaster clerk.
-// Please don't change this file.
 //
 
 import "net/rpc"
 import "time"
 import "fmt"
+import "math/big"
+import "crypto/rand"
 
 type Clerk struct {
-	servers []string // shardmaster replicas
+	servers  []string // shardmaster replicas
+	clerkId  int64    // the id of this clerk.
+	nextOpId int      // the next op id to allocate.
 }
 
 func MakeClerk(servers []string) *Clerk {
 	ck := new(Clerk)
 	ck.servers = servers
+	ck.clerkId = nrand()
+	ck.nextOpId = 0
 	return ck
 }
 
-//
+func nrand() int64 {
+	max := big.NewInt(int64(1) << 62)
+	bigx, _ := rand.Int(rand.Reader, max)
+	x := bigx.Int64()
+	return x
+}
+
+func (ck *Clerk) allocateOpId() int {
+	opId := ck.nextOpId
+	ck.nextOpId++
+	return opId
+}
+
 // call() sends an RPC to the rpcname handler on server srv
 // with arguments args, waits for the reply, and leaves the
 // reply in reply. the reply argument should be a pointer
@@ -35,7 +52,6 @@ func MakeClerk(servers []string) *Clerk {
 //
 // please use call() to send all RPCs, in client.go and server.go.
 // please don't change this function.
-//
 func call(srv string, rpcname string,
 	args interface{}, reply interface{}) bool {
 	c, errx := rpc.Dial("unix", srv)
@@ -54,14 +70,14 @@ func call(srv string, rpcname string,
 }
 
 func (ck *Clerk) Query(num int) Config {
+	args := &QueryArgs{Num: num, ClerkId: ck.clerkId, OpId: ck.allocateOpId()}
+
 	for {
 		// try each known server.
 		for _, srv := range ck.servers {
-			args := &QueryArgs{}
-			args.Num = num
 			var reply QueryReply
 			ok := call(srv, "ShardMaster.Query", args, &reply)
-			if ok {
+			if ok && reply.Err == OK {
 				return reply.Config
 			}
 		}
@@ -70,15 +86,14 @@ func (ck *Clerk) Query(num int) Config {
 }
 
 func (ck *Clerk) Join(gid int64, servers []string) {
+	args := &JoinArgs{GID: gid, Servers: servers, ClerkId: ck.clerkId, OpId: ck.allocateOpId()}
+
 	for {
 		// try each known server.
 		for _, srv := range ck.servers {
-			args := &JoinArgs{}
-			args.GID = gid
-			args.Servers = servers
 			var reply JoinReply
 			ok := call(srv, "ShardMaster.Join", args, &reply)
-			if ok {
+			if ok && reply.Err == OK {
 				return
 			}
 		}
@@ -87,14 +102,14 @@ func (ck *Clerk) Join(gid int64, servers []string) {
 }
 
 func (ck *Clerk) Leave(gid int64) {
+	args := &LeaveArgs{GID: gid, ClerkId: ck.clerkId, OpId: ck.allocateOpId()}
+
 	for {
 		// try each known server.
 		for _, srv := range ck.servers {
-			args := &LeaveArgs{}
-			args.GID = gid
 			var reply LeaveReply
 			ok := call(srv, "ShardMaster.Leave", args, &reply)
-			if ok {
+			if ok && reply.Err == OK {
 				return
 			}
 		}
@@ -103,15 +118,14 @@ func (ck *Clerk) Leave(gid int64) {
 }
 
 func (ck *Clerk) Move(shard int, gid int64) {
+	args := &MoveArgs{Shard: shard, GID: gid, ClerkId: ck.clerkId, OpId: ck.allocateOpId()}
+
 	for {
 		// try each known server.
 		for _, srv := range ck.servers {
-			args := &MoveArgs{}
-			args.Shard = shard
-			args.GID = gid
 			var reply MoveReply
 			ok := call(srv, "ShardMaster.Move", args, &reply)
-			if ok {
+			if ok && reply.Err == OK {
 				return
 			}
 		}
