@@ -29,7 +29,7 @@ type GetReply struct {
 type PutAppendArgs struct {
 	ClerkId int64
 	OpId    int
-	Op      string // "Put" or "Append"
+	OpType  string // "Put" or "Append"
 	Key     string
 	Value   string
 }

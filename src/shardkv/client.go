@@ -90,7 +90,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 	ck.mu.Lock()
 	defer ck.mu.Unlock()
 
-	args := &PutAppendArgs{ClerkId: ck.clerkId, OpId: ck.allocateOpId(), Op: op, Key: key, Value: value}
+	args := &PutAppendArgs{ClerkId: ck.clerkId, OpId: ck.allocateOpId(), OpType: op, Key: key, Value: value}
 
 	for {
 		shard := key2shard(key)
