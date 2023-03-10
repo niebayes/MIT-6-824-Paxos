@@ -4,8 +4,8 @@ package shardmaster
 // Shard master: assigns shards to replication groups.
 //
 // RPC interface:
-// Join(servers) -- add a set of groups (gid -> server-list mapping).
-// Leave(gids) -- delete a set of groups.
+// Join(gid, servers) -- add a replica groups (gid -> server-list mapping).
+// Leave(gid) -- delete a replica groups.
 // Move(shard, gid) -- hand off one shard from current owner to gid.
 // Query(num) -> fetch Config # num, or latest config if num==-1.
 //
@@ -23,6 +23,25 @@ type Config struct {
 	Num    int                // config number
 	Shards [NShards]int64     // shard -> gid
 	Groups map[int64][]string // gid -> servers[]
+}
+
+func (cfg *Config) clone() Config {
+	newConfig := Config{}
+
+	newConfig.Num = cfg.Num + 1
+
+	for i := 0; i < NShards; i++ {
+		newConfig.Shards[i] = cfg.Shards[i]
+	}
+
+	newConfig.Groups = make(map[int64][]string)
+	for gid, servers := range cfg.Groups {
+		serversClone := make([]string, len(servers))
+		copy(serversClone, servers)
+		newConfig.Groups[gid] = serversClone
+	}
+
+	return newConfig
 }
 
 type Err string
@@ -54,7 +73,7 @@ type LeaveReply struct {
 }
 
 type MoveArgs struct {
-	Shard   int
+	Shard   int // shard id.
 	GID     int64
 	ClerkId int64
 	OpId    int
@@ -65,7 +84,7 @@ type MoveReply struct {
 }
 
 type QueryArgs struct {
-	Num     int // desired config number
+	Num     int // config number.
 	ClerkId int64
 	OpId    int
 }
@@ -73,4 +92,18 @@ type QueryArgs struct {
 type QueryReply struct {
 	Config Config
 	Err    Err
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

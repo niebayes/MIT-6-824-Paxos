@@ -14,7 +14,6 @@ import "encoding/gob"
 import "math/rand"
 import "shardmaster"
 
-
 const Debug = 0
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
@@ -24,11 +23,9 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 	return
 }
 
-
 type Op struct {
 	// Your definitions here.
 }
-
 
 type ShardKV struct {
 	mu         sync.Mutex
@@ -44,6 +41,7 @@ type ShardKV struct {
 	// Your definitions here.
 }
 
+// TODO: record the from-to move log, create a struct {from_gid, to_gid, moved_shards}
 
 func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) error {
 	// Your code here.
@@ -56,10 +54,8 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error {
 	return nil
 }
 
-//
 // Ask the shardmaster if there's a new configuration;
 // if so, re-configure.
-//
 func (kv *ShardKV) tick() {
 }
 
@@ -89,15 +85,17 @@ func (kv *ShardKV) isunreliable() bool {
 	return atomic.LoadInt32(&kv.unreliable) != 0
 }
 
-//
 // Start a shardkv server.
 // gid is the ID of the server's replica group.
 // shardmasters[] contains the ports of the
-//   servers that implement the shardmaster.
-// servers[] contains the ports of the servers
-//   in this replica group.
-// Me is the index of this server in servers[].
 //
+//	servers that implement the shardmaster.
+//
+// servers[] contains the ports of the servers
+//
+//	in this replica group.
+//
+// Me is the index of this server in servers[].
 func StartServer(gid int64, shardmasters []string,
 	servers []string, me int) *ShardKV {
 	gob.Register(Op{})
@@ -114,7 +112,6 @@ func StartServer(gid int64, shardmasters []string,
 	rpcs.Register(kv)
 
 	kv.px = paxos.Make(servers, me, rpcs)
-
 
 	os.Remove(servers[me])
 	l, e := net.Listen("unix", servers[me])
