@@ -28,7 +28,7 @@ type Config struct {
 func (cfg *Config) clonedWithIncNum() Config {
 	newConfig := Config{}
 
-	newConfig.Num = cfg.Num
+	newConfig.Num = cfg.Num + 1
 
 	for i := 0; i < NShards; i++ {
 		newConfig.Shards[i] = cfg.Shards[i]

@@ -4,16 +4,20 @@ package shardmaster
 // Shardmaster clerk.
 //
 
-import "net/rpc"
-import "time"
-import "fmt"
-import "math/big"
-import "crypto/rand"
+import (
+	"crypto/rand"
+	"fmt"
+	"math/big"
+	"net/rpc"
+	"sync"
+	"time"
+)
 
 type Clerk struct {
 	servers  []string // shardmaster replicas
 	clerkId  int64    // the id of this clerk.
 	nextOpId int      // the next op id to allocate.
+	mu       sync.Mutex
 }
 
 func MakeClerk(servers []string) *Clerk {
@@ -21,6 +25,7 @@ func MakeClerk(servers []string) *Clerk {
 	ck.servers = servers
 	ck.clerkId = nrand()
 	ck.nextOpId = 0
+	ck.mu = sync.Mutex{}
 	return ck
 }
 
@@ -70,6 +75,9 @@ func call(srv string, rpcname string,
 }
 
 func (ck *Clerk) Query(num int) Config {
+	ck.mu.Lock()
+	defer ck.mu.Unlock()
+
 	args := &QueryArgs{Num: num, ClerkId: ck.clerkId, OpId: ck.allocateOpId()}
 
 	for {
@@ -86,6 +94,9 @@ func (ck *Clerk) Query(num int) Config {
 }
 
 func (ck *Clerk) Join(gid int64, servers []string) {
+	ck.mu.Lock()
+	defer ck.mu.Unlock()
+
 	args := &JoinArgs{GID: gid, Servers: servers, ClerkId: ck.clerkId, OpId: ck.allocateOpId()}
 
 	for {
@@ -102,6 +113,9 @@ func (ck *Clerk) Join(gid int64, servers []string) {
 }
 
 func (ck *Clerk) Leave(gid int64) {
+	ck.mu.Lock()
+	defer ck.mu.Unlock()
+
 	args := &LeaveArgs{GID: gid, ClerkId: ck.clerkId, OpId: ck.allocateOpId()}
 
 	for {
@@ -118,6 +132,9 @@ func (ck *Clerk) Leave(gid int64) {
 }
 
 func (ck *Clerk) Move(shard int, gid int64) {
+	ck.mu.Lock()
+	defer ck.mu.Unlock()
+
 	args := &MoveArgs{Shard: shard, GID: gid, ClerkId: ck.clerkId, OpId: ck.allocateOpId()}
 
 	for {

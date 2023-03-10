@@ -28,6 +28,12 @@ func cleanup(sma []*ShardMaster) {
 	}
 }
 
+// `check` takes as input a set of expected group ids.
+// it first queries the shardmaster for the latest configuration.
+// it then checks if all the expected groups are in the configuration.
+// it then checks if all shards are assigned to some valid groups.
+// it finally checks if the assignment of shards is balance.
+//
 // maybe should take a cka[] and find the server with
 // the highest Num.
 func check(t *testing.T, groups []int64, ck *Clerk) {
@@ -77,6 +83,7 @@ func check(t *testing.T, groups []int64, ck *Clerk) {
 func TestBasic(t *testing.T) {
 	runtime.GOMAXPROCS(4)
 
+	// create a shardmaster cluster with nservers servers.
 	const nservers = 3
 	var sma []*ShardMaster = make([]*ShardMaster, nservers)
 	var kvh []string = make([]string, nservers)
@@ -86,12 +93,17 @@ func TestBasic(t *testing.T) {
 		kvh[i] = port("basic", i)
 	}
 	for i := 0; i < nservers; i++ {
+		// each shardmaster server knows all other servers in the shardmaster cluster.
 		sma[i] = StartServer(kvh, i)
 	}
 
+	// create a set of shardmaster clerks used to send commands to the shardmaster cluster.
+	// ck is a single shardmaster clerk which is used to send commands to the shardmaster cluster sequentially.
 	ck := MakeClerk(kvh)
+	// cka is a list of shardmaster clerks which are used to send commands concurrently to the shardmaster cluster.
 	var cka [nservers]*Clerk
 	for i := 0; i < nservers; i++ {
+		// each clerk in cka can only contact one shardmaster server.
 		cka[i] = MakeClerk([]string{kvh[i]})
 	}
 
@@ -214,6 +226,12 @@ func TestBasic(t *testing.T) {
 	fmt.Printf("Test: Concurrent leave/join ...\n")
 
 	const npara = 10
+	// there're ten threads concurrently sending commands to the same shardmaster.
+	// each thread will send a sequence of join and leace commands:
+	// for a given thread with id x, it first sends a join(gid: x + 1000),
+	// it then sends a join(x), it finally sends a leave(gid: x + 1000).
+	// since threads have unique thread ids, the gids won't collide and
+	// hence the final groups in the shardmaster are [1..10].
 	gids := make([]int64, npara)
 	var ca [npara]chan bool
 	for xi := 0; xi < npara; xi++ {
@@ -222,6 +240,26 @@ func TestBasic(t *testing.T) {
 		go func(i int) {
 			defer func() { ca[i] <- true }()
 			var gid int64 = gids[i]
+			// more than one threads might call Join with the same arguments, i.e. the shardmaster
+			// might receive the same commands from two clerks.
+			// only one of the commands will be executed due to the dup checking and dup filtering logic
+			// in the server side.
+			//
+			// another scenario worth mentioning is that more than one threads might call Join different arguments
+			// on the same clerk.
+			// if there's no concurrency control in the clerk side, then these Join's will be running
+			// simultaneously.
+			// say, there're two such simultaneously-running Join's. They must have been assigned two
+			// different op ids.
+			// if happens the Join with the greater op id is executed prior to the execution of the Join with the less op id,
+			// then due to the dup checking and dup filtering logic in the server side, the Join with the less
+			// op id will not be executed.
+			//
+			// to solve such a concurrency bug, we have to add concurrency control in the clerk side.
+			//
+			// note, the lab says there's no need to add such a concurrency control in the clerk side.
+			// this is because it assumes there's no dup checking and dup filtering logic in the server side.
+			// therefore all Join's will be executed since there're no assigned op ids.
 			cka[(i+0)%nservers].Join(gid+1000, []string{"a", "b", "c"})
 			cka[(i+0)%nservers].Join(gid, []string{"a", "b", "c"})
 			cka[(i+1)%nservers].Leave(gid + 1000)
@@ -298,7 +336,7 @@ func TestUnreliable(t *testing.T) {
 		// don't turn on unreliable because the assignment
 		// doesn't require the shardmaster to detect duplicate
 		// client requests.
-		// sma[i].setunreliable(true)
+		sma[i].setunreliable(true)
 	}
 
 	ck := MakeClerk(kvh)
