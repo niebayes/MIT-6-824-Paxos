@@ -6,34 +6,19 @@ package shardkv
 // Shardmaster decides which group serves each shard.
 // Shardmaster may change shard assignment from time to time.
 //
-// You will have to modify these definitions.
-//
 
 const (
-	OK            = "OK"
-	ErrNoKey      = "ErrNoKey"
-	ErrWrongGroup = "ErrWrongGroup"
+	OK             = "OK"
+	ErrWrongGroup  = "ErrWrongGroup"
+	ErrNotExecuted = "ErrNotExecuted"
 )
 
 type Err string
 
-type PutAppendArgs struct {
-	Key   string
-	Value string
-	Op    string // "Put" or "Append"
-	// You'll have to add definitions here.
-	// Field names must start with capital letters,
-	// otherwise RPC will break.
-
-}
-
-type PutAppendReply struct {
-	Err Err
-}
-
 type GetArgs struct {
-	Key string
-	// You'll have to add definitions here.
+	ClerkId int64
+	OpId    int
+	Key     string
 }
 
 type GetReply struct {
@@ -41,3 +26,14 @@ type GetReply struct {
 	Value string
 }
 
+type PutAppendArgs struct {
+	ClerkId int64
+	OpId    int
+	Op      string // "Put" or "Append"
+	Key     string
+	Value   string
+}
+
+type PutAppendReply struct {
+	Err Err
+}
