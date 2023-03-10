@@ -5,26 +5,16 @@ import "fmt"
 import "net/rpc"
 import "log"
 import "time"
-import "paxos"
+import "6.824/src/paxos"
 import "sync"
 import "sync/atomic"
 import "os"
 import "syscall"
 import "encoding/gob"
 import "math/rand"
-import "shardmaster"
-
-const Debug = 0
-
-func DPrintf(format string, a ...interface{}) (n int, err error) {
-	if Debug > 0 {
-		log.Printf(format, a...)
-	}
-	return
-}
+import "6.824/src/shardmaster"
 
 type Op struct {
-	// Your definitions here.
 }
 
 type ShardKV struct {
@@ -37,20 +27,16 @@ type ShardKV struct {
 	px         *paxos.Paxos
 
 	gid int64 // my replica group ID
-
-	// Your definitions here.
 }
 
 // TODO: record the from-to move log, create a struct {from_gid, to_gid, moved_shards}
 
 func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) error {
-	// Your code here.
 	return nil
 }
 
 // RPC handler for client Put and Append requests
 func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error {
-	// Your code here.
 	return nil
 }
 
@@ -105,9 +91,6 @@ func StartServer(gid int64, shardmasters []string,
 	kv.gid = gid
 	kv.sm = shardmaster.MakeClerk(shardmasters)
 
-	// Your initialization code here.
-	// Don't call Join().
-
 	rpcs := rpc.NewServer()
 	rpcs.Register(kv)
 
@@ -124,9 +107,9 @@ func StartServer(gid int64, shardmasters []string,
 	// or do anything to subvert it.
 
 	go func() {
-		for kv.isdead() == false {
+		for !kv.isdead() {
 			conn, err := kv.l.Accept()
-			if err == nil && kv.isdead() == false {
+			if err == nil && !kv.isdead() {
 				if kv.isunreliable() && (rand.Int63()%1000) < 100 {
 					// discard the request.
 					conn.Close()
@@ -145,7 +128,7 @@ func StartServer(gid int64, shardmasters []string,
 			} else if err == nil {
 				conn.Close()
 			}
-			if err != nil && kv.isdead() == false {
+			if err != nil && !kv.isdead() {
 				fmt.Printf("ShardKV(%v) accept: %v\n", me, err.Error())
 				kv.kill()
 			}
@@ -153,7 +136,7 @@ func StartServer(gid int64, shardmasters []string,
 	}()
 
 	go func() {
-		for kv.isdead() == false {
+		for !kv.isdead() {
 			kv.tick()
 			time.Sleep(250 * time.Millisecond)
 		}

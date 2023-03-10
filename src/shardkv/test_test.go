@@ -1,7 +1,7 @@
 package shardkv
 
 import "testing"
-import "shardmaster"
+import "6.824/src/shardmaster"
 import "runtime"
 import "strconv"
 import "os"
@@ -38,9 +38,7 @@ func port(tag string, host int) string {
 	return s
 }
 
-//
 // start a k/v replica server thread.
-//
 func (tc *tCluster) start1(gi int, si int, unreliable bool) {
 	s := StartServer(tc.groups[gi].gid, tc.masterports, tc.groups[gi].ports, si)
 	tc.groups[gi].servers[si] = s
