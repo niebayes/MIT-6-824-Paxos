@@ -18,7 +18,6 @@ import (
 )
 
 const backoffFactor = 2
-const initWaitTime = 25 * time.Millisecond
 const maxWaitTime = 500 * time.Millisecond
 const initSleepTime = 10 * time.Millisecond
 const maxSleepTime = 500 * time.Millisecond
@@ -136,7 +135,7 @@ func printGidToShards(config *Config) {
 		gidAndShardsArray = append(gidAndShardsArray, GidAndShards{gid: gid, shards: shards})
 	}
 
-	// sort the array by the number of shards in descending order.
+	// sort the array by group id in ascending order.
 	// FIXME: seems a stable sort is needed.
 	sort.Slice(gidAndShardsArray, func(i, j int) bool { return gidAndShardsArray[i].gid < gidAndShardsArray[j].gid })
 
@@ -147,7 +146,7 @@ func printGidToShards(config *Config) {
 
 // note: everything is pass-by-value in Go. However, the passed-by slice is a header which points
 // to the backing array and any modification on the copied slice header will be made on the backing array.
-func rebalanceShards(config *Config, newGid int64) {
+func rebalanceShards(config *Config, isJoin bool, movedGid int64) {
 	printf("####################\nBefore rebalaning:")
 	printGidToShards(config)
 
@@ -169,14 +168,22 @@ func rebalanceShards(config *Config, newGid int64) {
 	sort.Slice(gidAndShardsArray, func(i, j int) bool { return len(gidAndShardsArray[i].shards) > len(gidAndShardsArray[j].shards) })
 
 	// compute the expected number of shards of each group after the rebalancing.
-	numGroups := len(config.Groups) + 1 // the new group must have been added to the Groups.
-	base := NShards / numGroups         // any group could get at least base shards.
-	totalBonus := NShards % numGroups   // only some groups could get bonus shards.
+	numGroups := len(config.Groups)   // the Groups must have been added or removed the group.
+	base := NShards / numGroups       // any group could get at least base shards.
+	totalBonus := NShards % numGroups // only some groups could get bonus shards.
 
-	// append an element for the new group so that the new group could be iterated
-	gidAndShardsArray = append(gidAndShardsArray, GidAndShards{gid: newGid, shards: make([]int, 0)})
+	if isJoin {
+		// append an element for the new group so that the new group could be iterated
+		gidAndShardsArray = append(gidAndShardsArray, GidAndShards{gid: movedGid, shards: make([]int, 0)})
+	}
 	expectedNumShardsOfGroup := make(map[int64]int)
 	for _, gidAndShards := range gidAndShardsArray {
+		if !isJoin && gidAndShards.gid == movedGid {
+			// the leaved group has no shards after the rebalancing.
+			expectedNumShardsOfGroup[movedGid] = 0
+			continue
+		}
+
 		expectedNumShards := base
 		if totalBonus > 0 {
 			expectedNumShards += 1
@@ -233,7 +240,7 @@ func rebalanceShards(config *Config, newGid int64) {
 			if numMovedOutShards >= len(fromGidAndShards.shards) {
 				from[j].shards = make([]int, 0)
 			} else {
-				from[j].shards = fromGidAndShards.shards[numMovedOutShards+1:]
+				from[j].shards = fromGidAndShards.shards[numMovedOutShards:]
 			}
 
 			for k := 0; k < numMovedOutShards; k++ {
@@ -266,21 +273,54 @@ func (sm *ShardMaster) executeOp(op *Op) {
 	case Join:
 		currConfig := sm.configs[len(sm.configs)-1]
 		if _, exist := currConfig.Groups[op.GID]; exist {
-			log.Fatalf("join an existing group. gid = %v", op.GID)
+			// do not execute the op if trying to join an existing group.
+			return
 		}
 
-		// create a new config with the addition of the new replica group.
-		newConfig := currConfig.clone()
+		// create a new config with the addition of the joined replica group.
+		newConfig := currConfig.clonedWithIncNum()
 		newConfig.Groups[op.GID] = op.Servers
 
 		// rebalance shards on replica groups.
-		rebalanceShards(&newConfig, op.GID)
+		rebalanceShards(&newConfig, true, op.GID)
+
+		sm.configs = append(sm.configs, newConfig)
 
 	case Leave:
+		currConfig := sm.configs[len(sm.configs)-1]
+		if _, exist := currConfig.Groups[op.GID]; !exist {
+			// do not execute the op if trying to leave an non-existing group.
+			return
+		}
+
+		// create a new config with the removal of the leaved replica group.
+		newConfig := currConfig.clonedWithIncNum()
+		delete(newConfig.Groups, op.GID)
+
+		// rebalance shards on replica groups.
+		rebalanceShards(&newConfig, false, op.GID)
+
+		sm.configs = append(sm.configs, newConfig)
 
 	case Move:
+		currConfig := sm.configs[len(sm.configs)-1]
+		if _, exist := currConfig.Groups[op.GID]; !exist {
+			// do not execute the op if trying to assign a shard to a non-existing group.
+			return
+		}
+
+		// create a new config.
+		newConfig := currConfig.clonedWithIncNum()
+		// reassign the shard.
+		newConfig.Shards[op.Shard] = op.GID
+
+		sm.configs = append(sm.configs, newConfig)
 
 	case Query:
+		// we choose not to execute query op at the executor thread.
+		// the executor and the Query handler live in different concurrent threads,
+		// therefore, the queried config may be out-of-date when the control flow
+		// backs to the Query handler.
 
 	default:
 		log.Fatalf("unexpected op type %v", op.OpType)
@@ -389,18 +429,216 @@ func (sm *ShardMaster) waitUntilExecutedOrTimeout(op *Op) bool {
 // of the configurations, Query also needs to be decided before being executed.
 
 func (sm *ShardMaster) Join(args *JoinArgs, reply *JoinReply) error {
+	sm.mu.Lock()
+
+	printf("S%v receives Join (C=%v Id=%v)", sm.me, args.ClerkId, args.OpId)
+
+	// wrap the request into an op.
+	op := &Op{ClerkId: args.ClerkId, OpId: args.OpId, OpType: Join, GID: args.GID, Servers: args.Servers}
+
+	// check if this is a dup request.
+	isDup := false
+	if opId, exist := sm.maxRecvOpIdFromClerk[op.ClerkId]; exist && opId >= op.OpId {
+		printf("S%v knows Join (C=%v Id=%v) is dup", sm.me, op.ClerkId, op.OpId)
+		isDup = true
+	}
+
+	if isDup {
+		sm.mu.Unlock()
+		if sm.waitUntilExecutedOrTimeout(op) {
+			printf("S%v replies Join (C=%v Id=%v)", sm.me, op.ClerkId, op.OpId)
+			reply.Err = OK
+
+		} else {
+			reply.Err = ErrNotExecuted
+		}
+		return nil
+	}
+	// not a dup request.
+
+	// update server state.
+	if opId, exist := sm.maxRecvOpIdFromClerk[op.ClerkId]; !exist || opId < op.OpId {
+		sm.maxRecvOpIdFromClerk[op.ClerkId] = op.OpId
+	}
+	sm.mu.Unlock()
+
+	// start proposing the op.
+	go sm.propose(op)
+
+	// wait until the op is executed or timeout.
+	if sm.waitUntilExecutedOrTimeout(op) {
+		printf("S%v replies Join (C=%v Id=%v)", sm.me, op.ClerkId, op.OpId)
+		reply.Err = OK
+
+	} else {
+		reply.Err = ErrNotExecuted
+	}
+
 	return nil
 }
 
 func (sm *ShardMaster) Leave(args *LeaveArgs, reply *LeaveReply) error {
+	sm.mu.Lock()
+
+	printf("S%v receives Leave (C=%v Id=%v)", sm.me, args.ClerkId, args.OpId)
+
+	// wrap the request into an op.
+	op := &Op{ClerkId: args.ClerkId, OpId: args.OpId, OpType: Join, GID: args.GID}
+
+	// check if this is a dup request.
+	isDup := false
+	if opId, exist := sm.maxRecvOpIdFromClerk[op.ClerkId]; exist && opId >= op.OpId {
+		printf("S%v knows Leave (C=%v Id=%v) is dup", sm.me, op.ClerkId, op.OpId)
+		isDup = true
+	}
+
+	if isDup {
+		sm.mu.Unlock()
+		if sm.waitUntilExecutedOrTimeout(op) {
+			printf("S%v replies Leave (C=%v Id=%v)", sm.me, op.ClerkId, op.OpId)
+			reply.Err = OK
+
+		} else {
+			reply.Err = ErrNotExecuted
+		}
+		return nil
+	}
+	// not a dup request.
+
+	// update server state.
+	if opId, exist := sm.maxRecvOpIdFromClerk[op.ClerkId]; !exist || opId < op.OpId {
+		sm.maxRecvOpIdFromClerk[op.ClerkId] = op.OpId
+	}
+	sm.mu.Unlock()
+
+	// start proposing the op.
+	go sm.propose(op)
+
+	// wait until the op is executed or timeout.
+	if sm.waitUntilExecutedOrTimeout(op) {
+		printf("S%v replies Leave (C=%v Id=%v)", sm.me, op.ClerkId, op.OpId)
+		reply.Err = OK
+
+	} else {
+		reply.Err = ErrNotExecuted
+	}
+
 	return nil
 }
 
 func (sm *ShardMaster) Move(args *MoveArgs, reply *MoveReply) error {
+	sm.mu.Lock()
+
+	printf("S%v receives Move (C=%v Id=%v)", sm.me, args.ClerkId, args.OpId)
+
+	// wrap the request into an op.
+	op := &Op{ClerkId: args.ClerkId, OpId: args.OpId, OpType: Join, GID: args.GID, Shard: args.Shard}
+
+	// check if this is a dup request.
+	isDup := false
+	if opId, exist := sm.maxRecvOpIdFromClerk[op.ClerkId]; exist && opId >= op.OpId {
+		printf("S%v knows Move (C=%v Id=%v) is dup", sm.me, op.ClerkId, op.OpId)
+		isDup = true
+	}
+
+	if isDup {
+		sm.mu.Unlock()
+		if sm.waitUntilExecutedOrTimeout(op) {
+			printf("S%v replies Move (C=%v Id=%v)", sm.me, op.ClerkId, op.OpId)
+			reply.Err = OK
+
+		} else {
+			reply.Err = ErrNotExecuted
+		}
+		return nil
+	}
+	// not a dup request.
+
+	// update server state.
+	if opId, exist := sm.maxRecvOpIdFromClerk[op.ClerkId]; !exist || opId < op.OpId {
+		sm.maxRecvOpIdFromClerk[op.ClerkId] = op.OpId
+	}
+	sm.mu.Unlock()
+
+	// start proposing the op.
+	go sm.propose(op)
+
+	// wait until the op is executed or timeout.
+	if sm.waitUntilExecutedOrTimeout(op) {
+		printf("S%v replies Move (C=%v Id=%v)", sm.me, op.ClerkId, op.OpId)
+		reply.Err = OK
+
+	} else {
+		reply.Err = ErrNotExecuted
+	}
+
 	return nil
 }
 
 func (sm *ShardMaster) Query(args *QueryArgs, reply *QueryReply) error {
+	sm.mu.Lock()
+
+	printf("S%v receives Query (C=%v Id=%v)", sm.me, args.ClerkId, args.OpId)
+
+	// wrap the request into an op.
+	op := &Op{ClerkId: args.ClerkId, OpId: args.OpId, OpType: Query, ConfigNum: args.Num}
+
+	// check if this is a dup request.
+	isDup := false
+	if opId, exist := sm.maxRecvOpIdFromClerk[op.ClerkId]; exist && opId >= op.OpId {
+		printf("S%v knows Query (C=%v Id=%v) is dup", sm.me, op.ClerkId, op.OpId)
+		isDup = true
+	}
+
+	if isDup {
+		sm.mu.Unlock()
+		if sm.waitUntilExecutedOrTimeout(op) {
+			sm.mu.Lock()
+			latestConfig := sm.configs[len(sm.configs)-1]
+			if op.ConfigNum == -1 || op.ConfigNum > latestConfig.Num {
+				reply.Config = latestConfig
+			} else {
+				reply.Config = sm.configs[op.ConfigNum]
+			}
+			sm.mu.Unlock()
+
+			reply.Err = OK
+			printf("S%v replies Query (C=%v Id=%v)", sm.me, op.ClerkId, op.OpId)
+
+		} else {
+			reply.Err = ErrNotExecuted
+		}
+		return nil
+	}
+	// not a dup request.
+
+	// update server state.
+	if opId, exist := sm.maxRecvOpIdFromClerk[op.ClerkId]; !exist || opId < op.OpId {
+		sm.maxRecvOpIdFromClerk[op.ClerkId] = op.OpId
+	}
+	sm.mu.Unlock()
+
+	// start proposing the op.
+	go sm.propose(op)
+
+	// wait until the op is executed or timeout.
+	if sm.waitUntilExecutedOrTimeout(op) {
+		sm.mu.Lock()
+		latestConfig := sm.configs[len(sm.configs)-1]
+		if op.ConfigNum == -1 || op.ConfigNum > latestConfig.Num {
+			reply.Config = latestConfig
+		} else {
+			reply.Config = sm.configs[op.ConfigNum]
+		}
+		sm.mu.Unlock()
+
+		reply.Err = OK
+		printf("S%v replies Query (C=%v Id=%v)", sm.me, op.ClerkId, op.OpId)
+
+	} else {
+		reply.Err = ErrNotExecuted
+	}
+
 	return nil
 }
 
@@ -471,9 +709,9 @@ func StartServer(servers []string, me int) *ShardMaster {
 	// or do anything to subvert it.
 
 	go func() {
-		for sm.isdead() == false {
+		for !sm.isdead() {
 			conn, err := sm.l.Accept()
-			if err == nil && sm.isdead() == false {
+			if err == nil && !sm.isdead() {
 				if sm.isunreliable() && (rand.Int63()%1000) < 100 {
 					// discard the request.
 					conn.Close()
@@ -492,7 +730,7 @@ func StartServer(servers []string, me int) *ShardMaster {
 			} else if err == nil {
 				conn.Close()
 			}
-			if err != nil && sm.isdead() == false {
+			if err != nil && !sm.isdead() {
 				fmt.Printf("ShardMaster(%v) accept: %v\n", me, err.Error())
 				sm.Kill()
 			}

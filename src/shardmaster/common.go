@@ -25,10 +25,10 @@ type Config struct {
 	Groups map[int64][]string // gid -> servers[]
 }
 
-func (cfg *Config) clone() Config {
+func (cfg *Config) clonedWithIncNum() Config {
 	newConfig := Config{}
 
-	newConfig.Num = cfg.Num + 1
+	newConfig.Num = cfg.Num
 
 	for i := 0; i < NShards; i++ {
 		newConfig.Shards[i] = cfg.Shards[i]

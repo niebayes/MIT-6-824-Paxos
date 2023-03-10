@@ -28,10 +28,8 @@ func cleanup(sma []*ShardMaster) {
 	}
 }
 
-//
 // maybe should take a cka[] and find the server with
 // the highest Num.
-//
 func check(t *testing.T, groups []int64, ck *Clerk) {
 	c := ck.Query(-1)
 	if len(c.Groups) != len(groups) {
@@ -63,7 +61,7 @@ func check(t *testing.T, groups []int64, ck *Clerk) {
 	}
 	min := 257
 	max := 0
-	for g, _ := range c.Groups {
+	for g := range c.Groups {
 		if counts[g] > max {
 			max = counts[g]
 		}
