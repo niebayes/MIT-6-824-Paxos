@@ -78,6 +78,11 @@ func (tc *tCluster) leave(gi int) {
 	tc.mck.Leave(tc.groups[gi].gid)
 }
 
+// create a shardmaster cluster which consists of three shardmaster servers.
+// create a shard-kv cluster which consists of three replica groups.
+// each replica group consists of three shard-kv servers.
+// there's also a shardmaster clerk used by the test suites to send commands to the
+// shardmaster cluster.
 func setup(t *testing.T, tag string, unreliable bool) *tCluster {
 	runtime.GOMAXPROCS(4)
 
@@ -123,6 +128,7 @@ func TestBasic(t *testing.T) {
 
 	fmt.Printf("Test: Basic Join/Leave ...\n")
 
+	// join the group 0.
 	tc.join(0)
 
 	ck := tc.clerk()
@@ -133,6 +139,7 @@ func TestBasic(t *testing.T) {
 		t.Fatalf("Get got wrong value")
 	}
 
+	// put a sequence of kv pairs.
 	keys := make([]string, 10)
 	vals := make([]string, len(keys))
 	for i := 0; i < len(keys); i++ {
@@ -141,7 +148,9 @@ func TestBasic(t *testing.T) {
 		ck.Put(keys[i], vals[i])
 	}
 
-	// are keys still there after joins?
+	// perform a sequence of join's.
+	// after each join, check if the all the kv pairs can still be fetched,
+	// and the replied value is the expected one.
 	for g := 1; g < len(tc.groups); g++ {
 		tc.join(g)
 		time.Sleep(1 * time.Second)
@@ -156,7 +165,9 @@ func TestBasic(t *testing.T) {
 		}
 	}
 
-	// are keys still there after leaves?
+	// perform a sequence of leave's.
+	// after each leave, check if the all the kv pairs can still be fetched,
+	// and the replied value is the expected one.
 	for g := 0; g < len(tc.groups)-1; g++ {
 		tc.leave(g)
 		time.Sleep(1 * time.Second)
@@ -174,6 +185,8 @@ func TestBasic(t *testing.T) {
 	fmt.Printf("  ... Passed\n")
 }
 
+// although named move, this test suite really checks that the shard rebalancing actually moves shard data.
+// there's no Move call in this test.
 func TestMove(t *testing.T) {
 	tc := setup(t, "move", false)
 	defer tc.cleanup()
@@ -232,6 +245,9 @@ func TestMove(t *testing.T) {
 	}
 }
 
+// limp, which means damaged, means there woulf be some dead replicas.
+// this test will kill a minority of servers and test if the cluster could handle
+// requests as normal.
 func TestLimp(t *testing.T) {
 	tc := setup(t, "limp", false)
 	defer tc.cleanup()
@@ -281,10 +297,13 @@ func TestLimp(t *testing.T) {
 	for gi := 0; gi < len(tc.groups)-1; gi++ {
 		tc.leave(gi)
 		time.Sleep(2 * time.Second)
+
+		// kill all servers in the leaved group.
 		g := tc.groups[gi]
 		for i := 0; i < len(g.servers); i++ {
 			g.servers[i].kill()
 		}
+
 		for i := 0; i < len(keys); i++ {
 			v := ck.Get(keys[i])
 			if v != vals[i] {
@@ -299,6 +318,10 @@ func TestLimp(t *testing.T) {
 	fmt.Printf("  ... Passed\n")
 }
 
+// this test spawns 11 concurrent threads where each appends a sequence of unique keys into
+// the cluster.
+// after each append, each thread moves a random shard to a random group and then checks
+// if the keys can still be successfully fetched from the cluster.
 func doConcurrent(t *testing.T, unreliable bool) {
 	tc := setup(t, "concurrent-"+strconv.FormatBool(unreliable), unreliable)
 	defer tc.cleanup()
@@ -328,6 +351,7 @@ func doConcurrent(t *testing.T, unreliable bool) {
 					t.Fatalf("Get(%v) expected %v got %v\n", key, last, v)
 				}
 
+				// move a random shard to a random group.
 				gi := rand.Int() % len(tc.groups)
 				gid := tc.groups[gi].gid
 				mymck.Move(rand.Int()%shardmaster.NShards, gid)
