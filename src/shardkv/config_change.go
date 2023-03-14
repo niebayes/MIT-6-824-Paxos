@@ -32,6 +32,8 @@ func (kv *ShardKV) tick() {
 		// the next config is installed when the install config op is applied.
 		op := &Op{OpType: "InstallConfig", Config: nextConfig}
 		go kv.propose(op)
+
+		println("S%v starts reconfiguring to config (CN=%v)", kv.me, nextConfig.Num)
 	}
 	kv.mu.Unlock()
 }
@@ -59,13 +61,19 @@ func (kv *ShardKV) installConfig(nextConfig shardmaster.Config) {
 	// install the next config.
 	kv.config = nextConfig
 
+	println("S%v installed config (CN=%v)", kv.me, kv.config.Num)
+
 	if !servedShardsChanged {
 		// if the served shards do not change, the reconfiguring is done.
 		kv.reconfiguring = false
+
+		println("S%v reconfigure done (CN=%v)", kv.me, kv.config.Num)
 		return
 
 	} else {
 		// otherwise, the server has to take over moved-in shards or/and hand off moved-out shards.
+
+		println("S%v starts handing off shards", kv.me)
 
 		// the shard migration is performed in a push-based way, i.e. the initiator of a shard migration
 		// is the replica group who is going to handoff shards.

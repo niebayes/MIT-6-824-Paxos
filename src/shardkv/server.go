@@ -236,24 +236,91 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error {
 	return nil
 }
 
-func (kv *ShardKV) maybeApplyOp(op *Op) {
-	if op.OpType == "ConfigChange" {
-		// install the new config if it's more up-to-date than the current config and the server is not reconfiguring.
-		if op.Config.Num > kv.config.Num && !kv.reconfiguring {
+func (kv *ShardKV) executor() {
+	kv.mu.Lock()
+	for !kv.isdead() {
+		op, decided := kv.decidedOps[kv.nextExecSeqNum]
+		if decided {
+			// try to apply the decided op on the server.
+			if kv.isAdminOp(&op) {
+				kv.maybeApplyAdminOp(&op)
+
+			} else {
+				kv.maybeApplyClientOp(&op)
+
+				if opId, exist := kv.maxPropOpIdOfClerk[op.ClerkId]; !exist || opId < op.OpId {
+					// update the max proposed op id the server has ever seen to support
+					// dup checking and filtering.
+					kv.maxPropOpIdOfClerk[op.ClerkId] = op.OpId
+				}
+			}
+
+			// tell the paxos peer that this op is done and free server state.
+			// if an op is not applied this time, it will never get applied.
+			// however, a new op constructed from the same request is allowed to get applied in future.
+			// therefore, this delete is safe.
+			kv.px.Done(kv.nextExecSeqNum)
+			delete(kv.decidedOps, kv.nextExecSeqNum)
+
+			// update server state.
+			kv.nextExecSeqNum++
+			if kv.nextExecSeqNum > kv.nextAllocSeqNum {
+				// although each server executes the decided ops independently,
+				// a server may see ops proposed by other servers.
+				// if the server proposes an op with a stale seq num, than the op would never get
+				// decided.
+				// hence, we need to update the seq num so that the server has more chance to
+				// allocate a large-enough seq num to let the op get decided.
+				kv.nextAllocSeqNum = kv.nextExecSeqNum
+			}
+
+			println("S%v state (ASN=%v ESN=%v CN=%v C=%v RId=%v EId=%v)", kv.me, kv.nextAllocSeqNum, kv.nextExecSeqNum, kv.config.Num, op.ClerkId, kv.maxPropOpIdOfClerk[op.ClerkId], kv.maxApplyOpIdOfClerk[op.ClerkId])
+
+		} else {
+			kv.hasNewDecidedOp.Wait()
+		}
+	}
+	kv.mu.Unlock()
+}
+
+func (kv *ShardKV) isAdminOp(op *Op) bool {
+	return op.OpType == "InstallConfig" || op.OpType == "InstallShard"
+}
+
+func (kv *ShardKV) maybeApplyAdminOp(op *Op) {
+	switch op.OpType {
+	case "InstallConfig":
+		// install the config it's config num is one larger than the current config
+		// and the server is not reconfiguring.
+		if op.Config.Num == kv.config.Num+1 && !kv.reconfiguring {
 			kv.installConfig(op.Config)
 
-			println("S%v applied ConfigChange op (CN=%v) at N=%v", kv.me, op.Config.Num, kv.nextExecSeqNum)
+			println("S%v applied InstallConfig op (CN=%v) at N=%v", kv.me, op.Config.Num, kv.nextExecSeqNum)
 		}
-	} else {
-		// apply the client op if it's not executed previously and the server is serving the shard.
-		if opId, exist := kv.maxApplyOpIdOfClerk[op.ClerkId]; (!exist || opId < op.OpId) && kv.isServingKey(op.Key) {
-			kv.applyClientOp(op)
 
-			// update the max applied op for each clerk to implement the at-most-once semantics.
-			kv.maxApplyOpIdOfClerk[op.ClerkId] = op.OpId
+	case "InstallShard":
+		// install the shard if it's not installed yet and the server is reconfiguring.
+		// FIXME: it's necessary to only install the shard if the shard config is the same as the server's current config?
+		if kv.reconfiguring && kv.shardDBs[op.Shard].state == MovingIn {
+			kv.installShard(op)
 
-			println("S%v applied client op (C=%v Id=%v) at N=%v", kv.me, op.ClerkId, op.OpId, kv.nextExecSeqNum)
+			println("S%v applied InstallShard op (CN=%v, SN=%v) at N=%v", kv.me, op.Config.Num, op.Shard, kv.nextExecSeqNum)
 		}
+
+	default:
+		log.Fatalf("unexpected admin op type %v", op.OpType)
+	}
+}
+
+func (kv *ShardKV) maybeApplyClientOp(op *Op) {
+	// apply the client op if it's not executed previously and the server is serving the shard.
+	if opId, exist := kv.maxApplyOpIdOfClerk[op.ClerkId]; (!exist || opId < op.OpId) && kv.isServingKey(op.Key) {
+		kv.applyClientOp(op)
+
+		// update the max applied op for each clerk to implement the at-most-once semantics.
+		kv.maxApplyOpIdOfClerk[op.ClerkId] = op.OpId
+
+		println("S%v applied client op (C=%v Id=%v) at N=%v", kv.me, op.ClerkId, op.OpId, kv.nextExecSeqNum)
 	}
 }
 
@@ -274,7 +341,7 @@ func (kv *ShardKV) applyClientOp(op *Op) {
 		db[op.Key] += op.Value
 
 	default:
-		log.Fatalf("unexpected op type %v", op.OpType)
+		log.Fatalf("unexpected client op type %v", op.OpType)
 	}
 }
 

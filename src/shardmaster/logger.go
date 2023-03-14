@@ -4,9 +4,8 @@ import (
 	"fmt"
 )
 
-const DEBUG = true
+const DEBUG = false
 
-// FIXME: change println to println since a new line is always appended.
 func println(format string, a ...interface{}) {
 	// print iff debug is set.
 	if DEBUG {

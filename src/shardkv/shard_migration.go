@@ -80,6 +80,8 @@ func (kv *ShardKV) handoffShards(configNum int) {
 
 		time.Sleep(handoffShardsInterval)
 	}
+
+	println("S%v done handing off shards", kv.me)
 }
 
 func (kv *ShardKV) checkMigrationState(configNum int) {
@@ -101,6 +103,7 @@ func (kv *ShardKV) checkMigrationState(configNum int) {
 
 		if !migrating {
 			kv.reconfiguring = false
+			println("S%v reconfigure done (CN=%v)", kv.me, kv.config.Num)
 			kv.mu.Unlock()
 			break
 		}
@@ -174,4 +177,9 @@ func (kv *ShardKV) InstallShard(args *InstallShardArgs, reply *InstallShardReply
 	reply.Err = OK
 
 	return nil
+}
+
+func (kv *ShardKV) installShard(op *Op) {
+	kv.shardDBs[op.Shard].dB = op.DB
+	kv.shardDBs[op.Shard].state = Serving
 }
