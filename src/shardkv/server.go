@@ -19,14 +19,23 @@ const maxWaitTime = 500 * time.Millisecond
 const initSleepTime = 10 * time.Millisecond
 const maxSleepTime = 500 * time.Millisecond
 const handoffShardsInterval = 200 * time.Millisecond
+const checkMigrationStateInterval = 200 * time.Millisecond
 
+// TODO：尝试将 polling waiting to apply 改为 channel。当时是因为啥原因来着，一开始用了 channel，后来好像 close channel 不太懂，就没用了。
+// TODO: add doc for how i solve the two challenges in the 6.824 lab4.
+
+// the normal execution phase of an op consists of:
+// receive request, propose op, decide op, execute op, apply op.
 type Op struct {
-	ClerkId int64
-	OpId    int
-	OpType  string
-	Key     string
-	Value   string
-	Config  shardmaster.Config // the config to be installed.
+	ClerkId             int64
+	OpId                int
+	OpType              string // "Get", "Put", "Append", "InstallConfig", "InstallShard".
+	Key                 string
+	Value               string
+	Config              shardmaster.Config // the config to be installed.
+	Shard               int                // install shard op will install the shard data DB on the shard Shard.
+	DB                  map[string]string
+	MaxApplyOpIdOfClerk map[int64]int // the clerk state would also be installed upon the installation of the shard data.
 }
 
 type ShardState int
@@ -39,11 +48,12 @@ const (
 )
 
 type ShardDB struct {
-	// uppercased since ShardDB needs to be sent through RPC.
-	DB      map[string]string
-	State   ShardState
-	FromGid int64 // the group (id) from which the server is waiting for it to move in shard data.
-	ToGid   int64 // the group (id) to which the server is moving out the shard data.
+	dB    map[string]string
+	state ShardState
+	// if used push-based migration, toGid is used.
+	// if used pull-based migration, fromGid is used.
+	fromGid int64 // the group (id) from which the server is waiting for it to move in shard data.
+	toGid   int64 // the group (id) to which the server is moving out the shard data.
 }
 
 type ShardKV struct {
@@ -56,20 +66,20 @@ type ShardKV struct {
 	px         *paxos.Paxos
 
 	// the group id of the replica group this server is in.
-	// each shard-kv server is a member belongs to a replica group.
-	// this field is static.
 	gid int64
 	// all shards of the database.
-	// each replica group will only serve a subset of shards of the complete database.
+	// since the sharding is static, it's convenient to store shards in a fixed-size array.
 	shardDBs [shardmaster.NShards]ShardDB
 	// current config.
 	config shardmaster.Config
-	// true if the server is waiting to install a config which was proposed previously by the server.
-	waitingToInstallConfig bool
+	// true if the server is reconfiguring.
+	// the reconfiguring is set to true from the beginning of proposing a config change op
+	// to the complete of shard migration.
+	reconfiguring bool
 
 	// in order to interact with paxos, the following fields must be used.
 
-	// the next sequence number to allocate for an op.
+	// the next sequence number to allocate for an op to be proposed.
 	nextAllocSeqNum int
 	// the sequence number of the next op to execute.
 	nextExecSeqNum int
@@ -120,7 +130,7 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) error {
 			// simply return OK whatsoever since the clerk is able to differentiate between OK and ErrNoKey from the value.
 			reply.Err = OK
 			kv.mu.Lock()
-			reply.Value = kv.shardDBs[key2shard(op.Key)].DB[op.Key]
+			reply.Value = kv.shardDBs[key2shard(op.Key)].dB[op.Key]
 			kv.mu.Unlock()
 
 			println("S%v replies Get (C=%v Id=%v)", kv.me, op.ClerkId, op.OpId)
@@ -156,7 +166,7 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) error {
 	if kv.waitUntilAppliedOrTimeout(op) {
 		reply.Err = OK
 		kv.mu.Lock()
-		reply.Value = kv.shardDBs[key2shard(op.Key)].DB[op.Key]
+		reply.Value = kv.shardDBs[key2shard(op.Key)].dB[op.Key]
 		kv.mu.Unlock()
 
 		println("S%v replies Get (C=%v Id=%v)", kv.me, op.ClerkId, op.OpId)
@@ -228,9 +238,8 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error {
 
 func (kv *ShardKV) maybeApplyOp(op *Op) {
 	if op.OpType == "ConfigChange" {
-		// install the new config if it's more up-to-date than the current config and the server is not
-		// migrating shards.
-		if op.Config.Num > kv.config.Num && !kv.isMigrating() {
+		// install the new config if it's more up-to-date than the current config and the server is not reconfiguring.
+		if op.Config.Num > kv.config.Num && !kv.reconfiguring {
 			kv.installConfig(op.Config)
 
 			println("S%v applied ConfigChange op (CN=%v) at N=%v", kv.me, op.Config.Num, kv.nextExecSeqNum)
@@ -251,7 +260,7 @@ func (kv *ShardKV) maybeApplyOp(op *Op) {
 func (kv *ShardKV) applyClientOp(op *Op) {
 	// the write is applied on the corresponding shard.
 	shard := key2shard(op.Key)
-	db := kv.shardDBs[shard].DB
+	db := kv.shardDBs[shard].dB
 
 	switch op.OpType {
 	case "Get":
@@ -269,20 +278,16 @@ func (kv *ShardKV) applyClientOp(op *Op) {
 	}
 }
 
-// tell the server to shut itself down.
-// please don't change these two functions.
 func (kv *ShardKV) kill() {
 	atomic.StoreInt32(&kv.dead, 1)
 	kv.l.Close()
 	kv.px.Kill()
 }
 
-// call this to find out if the server is dead.
 func (kv *ShardKV) isdead() bool {
 	return atomic.LoadInt32(&kv.dead) != 0
 }
 
-// please do not change these two functions.
 func (kv *ShardKV) Setunreliable(what bool) {
 	if what {
 		atomic.StoreInt32(&kv.unreliable, 1)
@@ -316,7 +321,7 @@ func StartServer(gid int64, shardmasters []string,
 	kv.sm = shardmaster.MakeClerk(shardmasters)
 	kv.mu = sync.Mutex{}
 	kv.config = shardmaster.Config{Num: 0}
-	kv.waitingToInstallConfig = false
+	kv.reconfiguring = false
 	kv.nextAllocSeqNum = 0
 	kv.nextExecSeqNum = 0
 	kv.maxPropOpIdOfClerk = make(map[int64]int)
@@ -325,7 +330,7 @@ func StartServer(gid int64, shardmasters []string,
 	kv.hasNewDecidedOp = *sync.NewCond(&kv.mu)
 
 	for i := range kv.shardDBs {
-		kv.shardDBs[i].DB = make(map[string]string)
+		kv.shardDBs[i].dB = make(map[string]string)
 	}
 
 	rpcs := rpc.NewServer()
@@ -342,9 +347,6 @@ func StartServer(gid int64, shardmasters []string,
 
 	// start the executor thread.
 	go kv.executor()
-
-	// please do not change any of the following code,
-	// or do anything to subvert it.
 
 	go func() {
 		for !kv.isdead() {

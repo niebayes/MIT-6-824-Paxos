@@ -613,6 +613,9 @@ func (sm *ShardMaster) Move(args *MoveArgs, reply *MoveReply) error {
 	return nil
 }
 
+// TODO: separate paxos stub codes out.
+// TODO: update paxos inferface, e.g. max recv to max prop, etc.
+
 func (sm *ShardMaster) Query(args *QueryArgs, reply *QueryReply) error {
 	sm.mu.Lock()
 

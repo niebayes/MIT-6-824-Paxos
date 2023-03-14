@@ -11,6 +11,7 @@ const (
 	OK             = "OK"
 	ErrWrongGroup  = "ErrWrongGroup"
 	ErrNotExecuted = "ErrNotExecuted"
+	ErrNotProposed = "ErrNotProposed" // used in shard migration.
 )
 
 type Err string
@@ -36,4 +37,11 @@ type PutAppendArgs struct {
 
 type PutAppendReply struct {
 	Err Err
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
