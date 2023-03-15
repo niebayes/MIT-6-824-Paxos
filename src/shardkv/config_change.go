@@ -38,8 +38,8 @@ func (kv *ShardKV) tick() {
 
 func (kv *ShardKV) installConfig(nextConfig shardmaster.Config) {
 	// check if there's any change on the served shards.
-	hasShardsToHandoff := false
-	hasShardsToTakeOver := false
+	shardsToHandoff := make([]int, 0)
+	shardsToTakeOver := make([]int, 0)
 
 	for shard := 0; shard < shardmaster.NShards; shard++ {
 		currGid := kv.config.Shards[shard]
@@ -55,22 +55,26 @@ func (kv *ShardKV) installConfig(nextConfig shardmaster.Config) {
 			// move this shard from this group to the group with gid newGid.
 			kv.shardDBs[shard].state = MovingOut
 			kv.shardDBs[shard].toGid = newGid
-			hasShardsToHandoff = true
+			shardsToHandoff = append(shardsToHandoff, shard)
 		}
 		if currGid != kv.gid && newGid == kv.gid {
 			// move this shard from the group with gid currGid to this group.
 			kv.shardDBs[shard].state = MovingIn
 			kv.shardDBs[shard].fromGid = currGid
-			hasShardsToTakeOver = true
+			shardsToTakeOver = append(shardsToTakeOver, shard)
 		}
 	}
+
+	println("S%v-%v installed config (CN=%v)", kv.gid, kv.me, kv.config.Num)
+	println("old config:")
+	shardmaster.PrintGidToShards(&kv.config, true)
+	println("new config:")
+	shardmaster.PrintGidToShards(&nextConfig, true)
 
 	// install the next config.
 	kv.config = nextConfig
 
-	println("S%v-%v installed config (CN=%v)", kv.gid, kv.me, kv.config.Num)
-
-	if !hasShardsToHandoff && !hasShardsToTakeOver {
+	if len(shardsToHandoff) == 0 && len(shardsToTakeOver) == 0 {
 		// if the served shards do not change, the reconfiguring is done.
 		kv.reconfiguring = false
 
@@ -85,14 +89,14 @@ func (kv *ShardKV) installConfig(nextConfig shardmaster.Config) {
 		// on contrary, if performed in a pull-based way, the initiator of the shard migration is
 		// the replica group who is going to take over shards. This replica group sends a pull request
 		// to another replica group, and then that replica group starts sending shard data to the sender.
-		if hasShardsToHandoff {
+		if len(shardsToHandoff) > 0 {
 			go kv.handoffShards(kv.config.Num)
 
-			println("S%v-%v starts handing off shards", kv.gid, kv.me)
+			println("S%v-%v starts handing off shards %v", kv.gid, kv.me, shardsToHandoff)
 		}
 
-		if hasShardsToTakeOver {
-			println("S%v-%v waiting to take over shards", kv.gid, kv.me)
+		if len(shardsToTakeOver) > 0 {
+			println("S%v-%v waiting to take over shards %v", kv.gid, kv.me, shardsToTakeOver)
 		}
 
 		// periodically check the migration state.

@@ -354,6 +354,9 @@ func (sm *ShardMaster) maybeApplyClientOp(op *Op) {
 		sm.maxApplyOpIdOfClerk[op.ClerkId] = op.OpId
 
 		println("S%v applied client op (C=%v Id=%v) at N=%v", sm.me, op.ClerkId, op.OpId, sm.nextExecSeqNum)
+
+		// fmt.Printf("ShardMaster's latest config:\n")
+		// PrintGidToShards(&sm.configs[len(sm.configs)-1], true)
 	}
 }
 

@@ -41,6 +41,7 @@ type Op struct {
 
 type ShardState int
 
+// warning: be careful when using int enums. Remember to init to a reasonable value.
 const (
 	Serving    ShardState = iota // the server is serving the shard.
 	NotServing                   // the server is not serving the shard.
@@ -293,8 +294,6 @@ func (kv *ShardKV) maybeApplyAdminOp(op *Op) {
 		if op.Config.Num == kv.config.Num+1 {
 			kv.reconfiguring = true
 			kv.installConfig(op.Config)
-
-			println("S%v-%v applied InstallConfig op (CN=%v) at N=%v", kv.gid, kv.me, op.Config.Num, kv.nextExecSeqNum)
 		}
 
 	case "InstallShard":
@@ -343,7 +342,9 @@ func (kv *ShardKV) applyClientOp(op *Op) {
 
 	case "Append":
 		// note: the default value is returned if the key does not exist.
+		println("S%v-%v appends %v to %v on K=%v", kv.gid, kv.me, op.Value, db[op.Key], op.Key)
 		db[op.Key] += op.Value
+		println("S%v-%v appends got=%v", kv.gid, kv.me, db[op.Key])
 
 	default:
 		log.Fatalf("unexpected client op type %v", op.OpType)
@@ -410,6 +411,7 @@ func StartServer(gid int64, shardmasters []string,
 	kv.reconfiguring = false
 	for i := range kv.shardDBs {
 		kv.shardDBs[i].dB = make(map[string]string)
+		kv.shardDBs[i].state = NotServing
 	}
 
 	kv.nextAllocSeqNum = 0

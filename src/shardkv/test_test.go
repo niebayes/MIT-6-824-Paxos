@@ -352,15 +352,23 @@ func doConcurrent(t *testing.T, unreliable bool) {
 		go func(me int) {
 			ok := true
 			defer func() { ca[me] <- ok }()
+
 			ck := tc.clerk()
 			mymck := tc.shardclerk()
+
 			key := strconv.Itoa(me)
+			println("N%v K=%v is in shard %v", me, key, key2shard(key))
 			last := ""
+
 			for iters := 0; iters < 3; iters++ {
 				nv := strconv.Itoa(rand.Int())
+				fmt.Printf("N%v appends (K=%v V=%v)\n", me, key, nv)
 				ck.Append(key, nv)
 				last = last + nv
+
+				fmt.Printf("N%v gets (K=%v expected=%v)\n", me, key, last)
 				v := ck.Get(key)
+				fmt.Printf("N%v gets (K=%v got=%v)\n", me, key, v)
 				if v != last {
 					ok = false
 					t.Fatalf("Get(%v) expected %v got %v\n", key, last, v)
@@ -369,7 +377,10 @@ func doConcurrent(t *testing.T, unreliable bool) {
 				// move a random shard to a random group.
 				gi := rand.Int() % len(tc.groups)
 				gid := tc.groups[gi].gid
-				mymck.Move(rand.Int()%shardmaster.NShards, gid)
+
+				shardNum := rand.Int() % shardmaster.NShards
+				fmt.Printf("Move shard %v to G%v\n", shardNum, gid)
+				mymck.Move(shardNum, gid)
 
 				time.Sleep(time.Duration(rand.Int()%30) * time.Millisecond)
 			}
@@ -384,7 +395,7 @@ func doConcurrent(t *testing.T, unreliable bool) {
 	}
 }
 
-func TestConcurrent(t *testing.T) {
+func TestConcurrent1(t *testing.T) {
 	fmt.Printf("Test: Concurrent Put/Get/Move ...\n")
 	doConcurrent(t, false)
 	fmt.Printf("  ... Passed\n")

@@ -185,10 +185,24 @@ func (kv *ShardKV) InstallShard(args *InstallShardArgs, reply *InstallShardReply
 	return nil
 }
 
+// FIXME: 找到目前的问题了：一是由于没有正确 handle dup checking and dup filtering，而是没有保证 at-most-once semantics.
+// 着重考虑 max prop op id 和 max apply op id 在 concurrent install config and shard 和 discard request and discard reply
+// 时的情况。
 func (kv *ShardKV) installShard(op *Op) {
 	// install server state.
+	println("S%v-%v old db:\n", kv.gid, kv.me)
+	for k, v := range kv.shardDBs[op.Shard].dB {
+		println("K=%v V=%v", k, v)
+	}
+
+	// FIXME: install by replacing or updating?
 	kv.shardDBs[op.Shard].dB = op.DB
 	kv.shardDBs[op.Shard].state = Serving
+
+	println("S%v-%v new db:\n", kv.gid, kv.me)
+	for k, v := range kv.shardDBs[op.Shard].dB {
+		println("K=%v V=%v", k, v)
+	}
 
 	// update clerk state.
 	for clerkId, otherOpId := range op.MaxApplyOpIdOfClerk {
