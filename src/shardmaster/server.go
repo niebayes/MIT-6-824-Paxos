@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/rpc"
 	"os"
-	"sort"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -21,6 +20,7 @@ const backoffFactor = 2
 const maxWaitTime = 500 * time.Millisecond
 const initSleepTime = 10 * time.Millisecond
 const maxSleepTime = 500 * time.Millisecond
+const proposeNoOpInterval = 250 * time.Millisecond
 
 type OpType string
 
@@ -36,7 +36,7 @@ const (
 type Op struct {
 	ClerkId   int64
 	OpId      int
-	OpType    OpType   // Join, Leave, Move, Query.
+	OpType    OpType   // "Join", "Leave", "Move", "Query", "NoOp".
 	GID       int64    // group id. Used by Join, Leave, Move.
 	Servers   []string // group server ports. Used by Join.
 	Shard     int      // shard id. Used by Move.
@@ -54,61 +54,23 @@ type ShardMaster struct {
 	// all decided configurations. Indexed by config nums.
 	configs []Config
 
-	// inorder to interact with paxos, the following fields must be used.
-	// the next sequence number to allocate for an op.
+	// in order to interact with paxos, the following fields must be used.
+
+	// the next sequence number to allocate for an op to be proposed.
 	nextAllocSeqNum int
 	// the sequence number of the next op to execute.
 	nextExecSeqNum int
-	// the maximum op ids received from each clerk.
-	// any request with op id less than the max id is regarded as a dup request.
-	maxRecvOpIdFromClerk map[int64]int
-	// the maximum op id of the executed ops of each clerk.
-	// any op with op id less than the max id won't be executed.
-	maxExecOpIdOfClerk map[int64]int
+	// the maximum op id among all the ops proposed for each clerk.
+	// any op with op id less than the max id is regarded as a dup op.
+	maxPropOpIdOfClerk map[int64]int
+	// the maximum op id among all the applied ops of each clerk.
+	// any op with op id less than the max id won't be applied.
+	maxApplyOpIdOfClerk map[int64]int
 	// all decided ops this server knows of.
 	// key: sequence number, value: the decided op.
 	decidedOps map[int]Op
 	// to notify the executor that there's a new decided op.
 	hasNewDecidedOp sync.Cond
-}
-
-func (sm *ShardMaster) allocateSeqNum() int {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
-	seqNum := sm.nextAllocSeqNum
-	sm.nextAllocSeqNum++
-	return seqNum
-}
-
-// wait until the paxos instance with sequence number seqNum decided.
-// return the decided value when decided.
-func (sm *ShardMaster) waitUntilDecided(seqNum int) interface{} {
-	lastSleepTime := initSleepTime
-	for !sm.isdead() {
-		status, decidedValue := sm.px.Status(seqNum)
-		if status != paxos.Pending {
-			// if forgotten, decidedValue will be nil.
-			// but this shall not happen since this value is forgotten only after
-			// this server has called Done on this value.
-			return decidedValue
-		}
-
-		// wait a while and retry.
-		sleepTime := lastSleepTime * backoffFactor
-		if sleepTime > maxSleepTime {
-			sleepTime = maxSleepTime
-		}
-		time.Sleep(sleepTime)
-		lastSleepTime = sleepTime
-	}
-
-	// warning: the test suites will call `cleanup` upon termination which will kill the server.
-	// it's possible that `waitUntilDecided` exits prior to the termination of `propose`.
-	// in such a case, `decidedOp := kv.waitUntilDecided(seqNum).(Op)` would panic since a nil
-	// is returned from `waitUntilDecided`.
-	// to workaround such an issue, we choose to return a no-op instead of a nil.
-	return Op{OpType: "NoOp"}
 }
 
 type GidAndShards struct {
@@ -122,172 +84,280 @@ type Movement struct {
 	shards []int // moved shards.
 }
 
-func PrintGidToShards(config *Config, debug bool) {
-	if !debug {
-		return
+// Join, Leave and Move are write operations and hence definitely
+// need to be decided by paxos before being executed.
+// Query is a read operation. However, in order to let the clients see a consistent view
+// of the configurations, Query also needs to be decided before being executed.
+
+func (sm *ShardMaster) Join(args *JoinArgs, reply *JoinReply) error {
+	sm.mu.Lock()
+
+	println("S%v receives Join (C=%v Id=%v)", sm.me, args.ClerkId, args.OpId)
+
+	// wrap the request into an op.
+	op := &Op{ClerkId: args.ClerkId, OpId: args.OpId, OpType: Join, GID: args.GID, Servers: args.Servers}
+
+	// check if this is a dup request.
+	isDup := false
+	if opId, exist := sm.maxPropOpIdOfClerk[op.ClerkId]; exist && opId >= op.OpId {
+		println("S%v knows Join (C=%v Id=%v) is dup", sm.me, op.ClerkId, op.OpId)
+		isDup = true
 	}
 
-	gidToShards := make(map[int64][]int)
-	for shard, gid := range config.Shards {
-		if _, ok := gidToShards[gid]; !ok {
-			gidToShards[gid] = make([]int, 0)
+	if isDup {
+		sm.mu.Unlock()
+		if sm.waitUntilAppliedOrTimeout(op) {
+			println("S%v replies Join (C=%v Id=%v)", sm.me, op.ClerkId, op.OpId)
+			reply.Err = OK
+
+		} else {
+			reply.Err = ErrNotExecuted
 		}
-		gidToShards[gid] = append(gidToShards[gid], shard)
+		return nil
+	}
+	// not a dup request.
+
+	// update server state.
+	if opId, exist := sm.maxPropOpIdOfClerk[op.ClerkId]; !exist || opId < op.OpId {
+		sm.maxPropOpIdOfClerk[op.ClerkId] = op.OpId
+	}
+	sm.mu.Unlock()
+
+	// start proposing the op.
+	go sm.propose(op)
+
+	// wait until the op is executed or timeout.
+	if sm.waitUntilAppliedOrTimeout(op) {
+		println("S%v replies Join (C=%v Id=%v)", sm.me, op.ClerkId, op.OpId)
+		reply.Err = OK
+
+	} else {
+		reply.Err = ErrNotExecuted
 	}
 
-	// add mappings for groups with empty shards.
-	for gid := range config.Groups {
-		if _, ok := gidToShards[gid]; !ok {
-			gidToShards[gid] = make([]int, 0)
-		}
-	}
-
-	// convert map to slice to ensure the printing is in order.
-	gidAndShardsArray := make([]GidAndShards, 0)
-	for gid, shards := range gidToShards {
-		gidAndShardsArray = append(gidAndShardsArray, GidAndShards{gid: gid, shards: shards})
-	}
-
-	// sort the array by group id in ascending order.
-	sort.Slice(gidAndShardsArray, func(i, j int) bool { return gidAndShardsArray[i].gid < gidAndShardsArray[j].gid })
-
-	for _, gidAndShards := range gidAndShardsArray {
-		fmt.Printf("G%v: %v\n", gidAndShards.gid, gidAndShards.shards)
-	}
+	return nil
 }
 
-// note: everything is pass-by-value in Go. However, the passed-by slice is a header which points
-// to the backing array and any modification on the copied slice header will be made on the backing array.
-func rebalanceShards(config *Config, isJoin bool, movedGid int64) {
-	println("####################\nBefore rebalaning:")
-	PrintGidToShards(config, DEBUG)
+func (sm *ShardMaster) Leave(args *LeaveArgs, reply *LeaveReply) error {
+	sm.mu.Lock()
 
-	gidToShards := make(map[int64][]int)
-	for shard, gid := range config.Shards {
-		if _, ok := gidToShards[gid]; !ok {
-			gidToShards[gid] = make([]int, 0)
+	println("S%v receives Leave (C=%v Id=%v)", sm.me, args.ClerkId, args.OpId)
+
+	// wrap the request into an op.
+	op := &Op{ClerkId: args.ClerkId, OpId: args.OpId, OpType: Leave, GID: args.GID}
+
+	// check if this is a dup request.
+	isDup := false
+	if opId, exist := sm.maxPropOpIdOfClerk[op.ClerkId]; exist && opId >= op.OpId {
+		println("S%v knows Leave (C=%v Id=%v) is dup", sm.me, op.ClerkId, op.OpId)
+		isDup = true
+	}
+
+	if isDup {
+		sm.mu.Unlock()
+		if sm.waitUntilAppliedOrTimeout(op) {
+			println("S%v replies Leave (C=%v Id=%v)", sm.me, op.ClerkId, op.OpId)
+			reply.Err = OK
+
+		} else {
+			reply.Err = ErrNotExecuted
 		}
-		gidToShards[gid] = append(gidToShards[gid], shard)
+		return nil
+	}
+	// not a dup request.
+
+	// update server state.
+	if opId, exist := sm.maxPropOpIdOfClerk[op.ClerkId]; !exist || opId < op.OpId {
+		sm.maxPropOpIdOfClerk[op.ClerkId] = op.OpId
+	}
+	sm.mu.Unlock()
+
+	// start proposing the op.
+	go sm.propose(op)
+
+	// wait until the op is executed or timeout.
+	if sm.waitUntilAppliedOrTimeout(op) {
+		println("S%v replies Leave (C=%v Id=%v)", sm.me, op.ClerkId, op.OpId)
+		reply.Err = OK
+
+	} else {
+		reply.Err = ErrNotExecuted
 	}
 
-	// add mappings for groups with empty shards.
-	for gid := range config.Groups {
-		if _, ok := gidToShards[gid]; !ok {
-			gidToShards[gid] = make([]int, 0)
+	return nil
+}
+
+func (sm *ShardMaster) Move(args *MoveArgs, reply *MoveReply) error {
+	sm.mu.Lock()
+
+	println("S%v receives Move (C=%v Id=%v)", sm.me, args.ClerkId, args.OpId)
+
+	// wrap the request into an op.
+	op := &Op{ClerkId: args.ClerkId, OpId: args.OpId, OpType: Move, GID: args.GID, Shard: args.Shard}
+
+	// check if this is a dup request.
+	isDup := false
+	if opId, exist := sm.maxPropOpIdOfClerk[op.ClerkId]; exist && opId >= op.OpId {
+		println("S%v knows Move (C=%v Id=%v) is dup", sm.me, op.ClerkId, op.OpId)
+		isDup = true
+	}
+
+	if isDup {
+		sm.mu.Unlock()
+		if sm.waitUntilAppliedOrTimeout(op) {
+			println("S%v replies Move (C=%v Id=%v)", sm.me, op.ClerkId, op.OpId)
+			reply.Err = OK
+
+		} else {
+			reply.Err = ErrNotExecuted
 		}
+		return nil
+	}
+	// not a dup request.
+
+	// update server state.
+	if opId, exist := sm.maxPropOpIdOfClerk[op.ClerkId]; !exist || opId < op.OpId {
+		sm.maxPropOpIdOfClerk[op.ClerkId] = op.OpId
+	}
+	sm.mu.Unlock()
+
+	// start proposing the op.
+	go sm.propose(op)
+
+	// wait until the op is executed or timeout.
+	if sm.waitUntilAppliedOrTimeout(op) {
+		println("S%v replies Move (C=%v Id=%v)", sm.me, op.ClerkId, op.OpId)
+		reply.Err = OK
+
+	} else {
+		reply.Err = ErrNotExecuted
 	}
 
-	gidAndShardsArray := make([]GidAndShards, 0)
-	for gid, shards := range gidToShards {
-		gidAndShardsArray = append(gidAndShardsArray, GidAndShards{gid: gid, shards: shards})
+	return nil
+}
+
+func (sm *ShardMaster) Query(args *QueryArgs, reply *QueryReply) error {
+	sm.mu.Lock()
+
+	println("S%v receives Query (C=%v Id=%v)", sm.me, args.ClerkId, args.OpId)
+
+	// wrap the request into an op.
+	op := &Op{ClerkId: args.ClerkId, OpId: args.OpId, OpType: Query, ConfigNum: args.Num}
+
+	// check if this is a dup request.
+	isDup := false
+	if opId, exist := sm.maxPropOpIdOfClerk[op.ClerkId]; exist && opId >= op.OpId {
+		println("S%v knows Query (C=%v Id=%v) is dup", sm.me, op.ClerkId, op.OpId)
+		isDup = true
 	}
 
-	// sort the array by the number of shards in descending order.
-	// note: a stable sort is not needed, since only the #shards matters.
-	sort.Slice(gidAndShardsArray, func(i, j int) bool { return len(gidAndShardsArray[i].shards) > len(gidAndShardsArray[j].shards) })
-
-	// compute the expected number of shards of each group after the rebalancing.
-	numGroups := len(config.Groups)   // the Groups must have been added or removed the group.
-	base := NShards / numGroups       // any group could get at least base shards.
-	totalBonus := NShards % numGroups // only some groups could get bonus shards.
-
-	if isJoin {
-		// append an element for the new group so that the new group could be iterated
-		gidAndShardsArray = append(gidAndShardsArray, GidAndShards{gid: movedGid, shards: make([]int, 0)})
-	}
-	expectedNumShardsOfGroup := make(map[int64]int)
-	for _, gidAndShards := range gidAndShardsArray {
-		if !isJoin && gidAndShards.gid == movedGid {
-			// the leaved group has no shards after the rebalancing.
-			expectedNumShardsOfGroup[movedGid] = 0
-			continue
-		}
-
-		expectedNumShards := base
-		if totalBonus > 0 {
-			expectedNumShards += 1
-			totalBonus -= 1
-		}
-		expectedNumShardsOfGroup[gidAndShards.gid] = expectedNumShards
-	}
-
-	from := make([]GidAndShards, 0) // shards from which group need to be moved out.
-	to := make([]GidAndShards, 0)   // to which group shards need to be moved in.
-	for i, gidAndShards := range gidAndShardsArray {
-		gid := gidAndShards.gid
-		currShards := gidAndShards.shards
-		expectedNumShards := expectedNumShardsOfGroup[gid]
-		diff := len(currShards) - expectedNumShards
-		if diff > 0 {
-			// for a group, if its current number of shards is greater than the expected number of shards after rebalancing,
-			// then it shall give out the overflowed shards.
-
-			// select the last diff shards as the overflowed shards.
-			// note: many info, for e.g. the time the group serves the shard, the shard size, etc., could
-			// be utilized to devise a better algorithm to select the overflowed shards. For now, the selection
-			// algorithm is trivial.
-			remainingShards := currShards[:expectedNumShards]
-			movedOutShards := currShards[expectedNumShards:]
-			from = append(from, GidAndShards{gid: gid, shards: movedOutShards})
-			gidAndShardsArray[i].shards = remainingShards
-		} else if diff < 0 {
-			// for a group, if its current number of shards is less than the expected number of shards,
-			// then some other groups shall hand off their overflowed shards to the group.
-
-			// only the number of shards matters.
-			to = append(to, GidAndShards{gid: gid, shards: make([]int, -diff)})
-		}
-	}
-
-	// hand off overflowed shards to groups who need shards.
-	movements := make([]Movement, 0)
-	for i, toGidAndShards := range to {
-		totalNeededNumShards := len(toGidAndShards.shards)
-		cursor := 0
-
-		for j, fromGidAndShards := range from {
-			// no need to check if neededNumShards > 0 since the number of moved-in shards
-			// must be equal to the number of moved-out shards.
-			neededNumShards := totalNeededNumShards - cursor
-			numMovedOutShards := min(len(fromGidAndShards.shards), neededNumShards)
-			if numMovedOutShards <= 0 {
-				// all shards are moved out, skip this group.
-				continue
-			}
-			movedOutShards := fromGidAndShards.shards[:numMovedOutShards]
-
-			if numMovedOutShards >= len(fromGidAndShards.shards) {
-				from[j].shards = make([]int, 0)
+	if isDup {
+		sm.mu.Unlock()
+		if sm.waitUntilAppliedOrTimeout(op) {
+			sm.mu.Lock()
+			latestConfig := sm.configs[len(sm.configs)-1]
+			if op.ConfigNum == -1 || op.ConfigNum > latestConfig.Num {
+				reply.Config = latestConfig
 			} else {
-				from[j].shards = fromGidAndShards.shards[numMovedOutShards:]
+				reply.Config = sm.configs[op.ConfigNum]
 			}
+			sm.mu.Unlock()
 
-			for k := 0; k < numMovedOutShards; k++ {
-				toGidAndShards.shards[cursor+k] = movedOutShards[k]
-			}
-			cursor += numMovedOutShards
+			reply.Err = OK
+			println("S%v replies Query (C=%v Id=%v)", sm.me, op.ClerkId, op.OpId)
 
-			// record the movement.
-			movements = append(movements, Movement{from: fromGidAndShards.gid, to: toGidAndShards.gid, shards: movedOutShards})
+		} else {
+			reply.Err = ErrNotExecuted
 		}
+		return nil
+	}
+	// not a dup request.
 
-		to[i] = toGidAndShards
+	// update server state.
+	if opId, exist := sm.maxPropOpIdOfClerk[op.ClerkId]; !exist || opId < op.OpId {
+		sm.maxPropOpIdOfClerk[op.ClerkId] = op.OpId
+	}
+	sm.mu.Unlock()
+
+	// start proposing the op.
+	go sm.propose(op)
+
+	// wait until the op is executed or timeout.
+	if sm.waitUntilAppliedOrTimeout(op) {
+		sm.mu.Lock()
+		latestConfig := sm.configs[len(sm.configs)-1]
+		if op.ConfigNum == -1 || op.ConfigNum > latestConfig.Num {
+			reply.Config = latestConfig
+		} else {
+			reply.Config = sm.configs[op.ConfigNum]
+		}
+		sm.mu.Unlock()
+
+		reply.Err = OK
+		println("S%v replies Query (C=%v Id=%v)", sm.me, op.ClerkId, op.OpId)
+
+	} else {
+		reply.Err = ErrNotExecuted
 	}
 
-	println("Movements:")
-	for _, movement := range movements {
-		for _, shard := range movement.shards {
-			config.Shards[shard] = movement.to
-		}
-		println("G%v -> G%v: %v", movement.from, movement.to, movement.shards)
-	}
-
-	println("After rebalaning:")
-	PrintGidToShards(config, DEBUG)
-	println("####################")
+	return nil
 }
 
-func (sm *ShardMaster) executeOp(op *Op) {
+func (sm *ShardMaster) executor() {
+	sm.mu.Lock()
+	for !sm.isdead() {
+		op, decided := sm.decidedOps[sm.nextExecSeqNum]
+		if decided {
+			if sm.isNoOp(&op) {
+				// skip no-ops.
+
+			} else {
+				sm.maybeApplyClientOp(&op)
+			}
+
+			// tell the paxos peer that this op is done and free server state.
+			// if an op is not applied this time, it will never get applied.
+			// however, a new op constructed from the same request is allowed to get applied in future.
+			// therefore, this delete is safe.
+			sm.px.Done(sm.nextExecSeqNum)
+
+			// free server state.
+			delete(sm.decidedOps, sm.nextExecSeqNum)
+
+			// update server state.
+			sm.nextExecSeqNum++
+			if sm.nextExecSeqNum > sm.nextAllocSeqNum {
+				// although each server executes the decided ops independently,
+				// a server may see ops proposed by other servers.
+				// if the server proposes an op with a stale seq num, than the op would never get
+				// decided.
+				// hence, we need to update the seq num so that the server has more chance to
+				// allocate a large-enough seq num to let the op get decided.
+				sm.nextAllocSeqNum = sm.nextExecSeqNum
+			}
+
+			// println("S%v state (ASN=%v ESN=%v C=%v RId=%v EId=%v)", sm.me, sm.nextAllocSeqNum, sm.nextExecSeqNum, op.ClerkId, sm.maxPropOpIdOfClerk[op.ClerkId], sm.maxApplyOpIdOfClerk[op.ClerkId])
+
+		} else {
+			sm.hasNewDecidedOp.Wait()
+		}
+	}
+	sm.mu.Unlock()
+}
+
+func (sm *ShardMaster) maybeApplyClientOp(op *Op) {
+	// apply the client op if it's not executed previously and the server is serving the shard.
+	if opId, exist := sm.maxApplyOpIdOfClerk[op.ClerkId]; !exist || opId < op.OpId {
+		sm.applyClientOp(op)
+
+		// update the max applied op for each clerk to implement the at-most-once semantics.
+		sm.maxApplyOpIdOfClerk[op.ClerkId] = op.OpId
+
+		println("S%v applied client op (C=%v Id=%v) at N=%v", sm.me, op.ClerkId, op.OpId, sm.nextExecSeqNum)
+	}
+}
+
+func (sm *ShardMaster) applyClientOp(op *Op) {
 	switch op.OpType {
 	case Join:
 		println("S%v is about to executing Op Join (GID=%v Servers=%v)", sm.me, op.GID, op.Servers)
@@ -371,322 +441,17 @@ func (sm *ShardMaster) executeOp(op *Op) {
 	}
 }
 
-func (sm *ShardMaster) executor() {
-	sm.mu.Lock()
+func (sm *ShardMaster) isNoOp(op *Op) bool {
+	return op.OpType == "NoOp"
+}
+
+func (sm *ShardMaster) noOpTicker() {
 	for !sm.isdead() {
-		op, decided := sm.decidedOps[sm.nextExecSeqNum]
-		if decided {
-			// execute the decided op if it is not executed yet.
-			// this ensures the same op won't be execute more than once by a server.
-			// the same op might be executed more than once if different servers proposes the same
-			// request at different sequence numbers and just happens that they are all decided.
-			// there's no way to avoid such case since the paxos has the ability to decide multiple values
-			// at the same time.
-			if opId, exist := sm.maxExecOpIdOfClerk[op.ClerkId]; !exist || opId < op.OpId {
-				sm.executeOp(&op)
-				println("S%v executes op (C=%v Id=%v) at N=%v", sm.me, op.ClerkId, op.OpId, sm.nextExecSeqNum)
-			}
+		op := &Op{OpType: "NoOp"}
+		go sm.propose(op)
 
-			// tell the paxos peer that this op is done.
-			sm.px.Done(sm.nextExecSeqNum)
-
-			// free server state.
-			delete(sm.decidedOps, sm.nextExecSeqNum)
-
-			// update server state.
-			sm.nextExecSeqNum++
-			if sm.nextExecSeqNum > sm.nextAllocSeqNum {
-				sm.nextAllocSeqNum = sm.nextExecSeqNum
-			}
-			if opId, exist := sm.maxExecOpIdOfClerk[op.ClerkId]; !exist || opId < op.OpId {
-				sm.maxExecOpIdOfClerk[op.ClerkId] = op.OpId
-			}
-			if opId, exist := sm.maxRecvOpIdFromClerk[op.ClerkId]; !exist || opId < op.OpId {
-				sm.maxRecvOpIdFromClerk[op.ClerkId] = op.OpId
-			}
-
-			println("S%v state (ASN=%v ESN=%v C=%v RId=%v EId=%v)", sm.me, sm.nextAllocSeqNum, sm.nextExecSeqNum, op.ClerkId, sm.maxRecvOpIdFromClerk[op.ClerkId], sm.maxExecOpIdOfClerk[op.ClerkId])
-
-		} else {
-			sm.hasNewDecidedOp.Wait()
-		}
+		time.Sleep(proposeNoOpInterval)
 	}
-	sm.mu.Unlock()
-}
-
-func (sm *ShardMaster) propose(op *Op) {
-	for !sm.isdead() {
-		// choose a sequence number for the op.
-		seqNum := sm.allocateSeqNum()
-
-		// starts proposing the op at this sequence number.
-		sm.px.Start(seqNum, *op)
-		println("S%v starts proposing op (C=%v Id=%v) at N=%v", sm.me, op.ClerkId, op.OpId, seqNum)
-
-		// wait until the paxos instance with this sequence number is decided.
-		decidedOp := sm.waitUntilDecided(seqNum).(Op)
-		println("S%v knows op (C=%v Id=%v) is decided at N=%v", sm.me, decidedOp.ClerkId, decidedOp.OpId, seqNum)
-
-		// store the decided op.
-		sm.mu.Lock()
-		sm.decidedOps[seqNum] = decidedOp
-
-		// update server state.
-		if opId, exist := sm.maxRecvOpIdFromClerk[decidedOp.ClerkId]; !exist || opId < decidedOp.OpId {
-			sm.maxRecvOpIdFromClerk[decidedOp.ClerkId] = decidedOp.OpId
-		}
-
-		// notify the executor thread.
-		sm.hasNewDecidedOp.Signal()
-
-		// it's our op chosen as the decided value at sequence number seqNum.
-		if decidedOp.ClerkId == op.ClerkId && decidedOp.OpId == op.OpId {
-			// end proposing.
-			println("S%v ends proposing (C=%v Id=%v)", sm.me, decidedOp.ClerkId, decidedOp.OpId)
-			sm.mu.Unlock()
-			return
-		}
-		// another op is chosen as the decided value at sequence number seqNum.
-		// retry proposing the op at a different sequence number.
-		sm.mu.Unlock()
-	}
-}
-
-// return true if the op is executed before timeout.
-func (sm *ShardMaster) waitUntilExecutedOrTimeout(op *Op) bool {
-	startTime := time.Now()
-	for time.Since(startTime) < maxWaitTime {
-		sm.mu.Lock()
-		if opId, exist := sm.maxExecOpIdOfClerk[op.ClerkId]; exist && opId >= op.OpId {
-			sm.mu.Unlock()
-			return true
-		}
-		sm.mu.Unlock()
-		time.Sleep(100 * time.Millisecond)
-	}
-	return false
-}
-
-// Join, Leave and Move are write operations and hence definitely
-// need to be decided by paxos before being executed.
-// Query is a read operation. However, in order to let the clients see a consistent view
-// of the configurations, Query also needs to be decided before being executed.
-
-func (sm *ShardMaster) Join(args *JoinArgs, reply *JoinReply) error {
-	sm.mu.Lock()
-
-	println("S%v receives Join (C=%v Id=%v)", sm.me, args.ClerkId, args.OpId)
-
-	// wrap the request into an op.
-	op := &Op{ClerkId: args.ClerkId, OpId: args.OpId, OpType: Join, GID: args.GID, Servers: args.Servers}
-
-	// check if this is a dup request.
-	isDup := false
-	if opId, exist := sm.maxRecvOpIdFromClerk[op.ClerkId]; exist && opId >= op.OpId {
-		println("S%v knows Join (C=%v Id=%v) is dup", sm.me, op.ClerkId, op.OpId)
-		isDup = true
-	}
-
-	if isDup {
-		sm.mu.Unlock()
-		if sm.waitUntilExecutedOrTimeout(op) {
-			println("S%v replies Join (C=%v Id=%v)", sm.me, op.ClerkId, op.OpId)
-			reply.Err = OK
-
-		} else {
-			reply.Err = ErrNotExecuted
-		}
-		return nil
-	}
-	// not a dup request.
-
-	// update server state.
-	if opId, exist := sm.maxRecvOpIdFromClerk[op.ClerkId]; !exist || opId < op.OpId {
-		sm.maxRecvOpIdFromClerk[op.ClerkId] = op.OpId
-	}
-	sm.mu.Unlock()
-
-	// start proposing the op.
-	go sm.propose(op)
-
-	// wait until the op is executed or timeout.
-	if sm.waitUntilExecutedOrTimeout(op) {
-		println("S%v replies Join (C=%v Id=%v)", sm.me, op.ClerkId, op.OpId)
-		reply.Err = OK
-
-	} else {
-		reply.Err = ErrNotExecuted
-	}
-
-	return nil
-}
-
-func (sm *ShardMaster) Leave(args *LeaveArgs, reply *LeaveReply) error {
-	sm.mu.Lock()
-
-	println("S%v receives Leave (C=%v Id=%v)", sm.me, args.ClerkId, args.OpId)
-
-	// wrap the request into an op.
-	op := &Op{ClerkId: args.ClerkId, OpId: args.OpId, OpType: Leave, GID: args.GID}
-
-	// check if this is a dup request.
-	isDup := false
-	if opId, exist := sm.maxRecvOpIdFromClerk[op.ClerkId]; exist && opId >= op.OpId {
-		println("S%v knows Leave (C=%v Id=%v) is dup", sm.me, op.ClerkId, op.OpId)
-		isDup = true
-	}
-
-	if isDup {
-		sm.mu.Unlock()
-		if sm.waitUntilExecutedOrTimeout(op) {
-			println("S%v replies Leave (C=%v Id=%v)", sm.me, op.ClerkId, op.OpId)
-			reply.Err = OK
-
-		} else {
-			reply.Err = ErrNotExecuted
-		}
-		return nil
-	}
-	// not a dup request.
-
-	// update server state.
-	if opId, exist := sm.maxRecvOpIdFromClerk[op.ClerkId]; !exist || opId < op.OpId {
-		sm.maxRecvOpIdFromClerk[op.ClerkId] = op.OpId
-	}
-	sm.mu.Unlock()
-
-	// start proposing the op.
-	go sm.propose(op)
-
-	// wait until the op is executed or timeout.
-	if sm.waitUntilExecutedOrTimeout(op) {
-		println("S%v replies Leave (C=%v Id=%v)", sm.me, op.ClerkId, op.OpId)
-		reply.Err = OK
-
-	} else {
-		reply.Err = ErrNotExecuted
-	}
-
-	return nil
-}
-
-func (sm *ShardMaster) Move(args *MoveArgs, reply *MoveReply) error {
-	sm.mu.Lock()
-
-	println("S%v receives Move (C=%v Id=%v)", sm.me, args.ClerkId, args.OpId)
-
-	// wrap the request into an op.
-	op := &Op{ClerkId: args.ClerkId, OpId: args.OpId, OpType: Move, GID: args.GID, Shard: args.Shard}
-
-	// check if this is a dup request.
-	isDup := false
-	if opId, exist := sm.maxRecvOpIdFromClerk[op.ClerkId]; exist && opId >= op.OpId {
-		println("S%v knows Move (C=%v Id=%v) is dup", sm.me, op.ClerkId, op.OpId)
-		isDup = true
-	}
-
-	if isDup {
-		sm.mu.Unlock()
-		if sm.waitUntilExecutedOrTimeout(op) {
-			println("S%v replies Move (C=%v Id=%v)", sm.me, op.ClerkId, op.OpId)
-			reply.Err = OK
-
-		} else {
-			reply.Err = ErrNotExecuted
-		}
-		return nil
-	}
-	// not a dup request.
-
-	// update server state.
-	if opId, exist := sm.maxRecvOpIdFromClerk[op.ClerkId]; !exist || opId < op.OpId {
-		sm.maxRecvOpIdFromClerk[op.ClerkId] = op.OpId
-	}
-	sm.mu.Unlock()
-
-	// start proposing the op.
-	go sm.propose(op)
-
-	// wait until the op is executed or timeout.
-	if sm.waitUntilExecutedOrTimeout(op) {
-		println("S%v replies Move (C=%v Id=%v)", sm.me, op.ClerkId, op.OpId)
-		reply.Err = OK
-
-	} else {
-		reply.Err = ErrNotExecuted
-	}
-
-	return nil
-}
-
-// TODO: separate paxos stub codes out.
-// TODO: update paxos inferface, e.g. max recv to max prop, etc.
-
-func (sm *ShardMaster) Query(args *QueryArgs, reply *QueryReply) error {
-	sm.mu.Lock()
-
-	println("S%v receives Query (C=%v Id=%v)", sm.me, args.ClerkId, args.OpId)
-
-	// wrap the request into an op.
-	op := &Op{ClerkId: args.ClerkId, OpId: args.OpId, OpType: Query, ConfigNum: args.Num}
-
-	// check if this is a dup request.
-	isDup := false
-	if opId, exist := sm.maxRecvOpIdFromClerk[op.ClerkId]; exist && opId >= op.OpId {
-		println("S%v knows Query (C=%v Id=%v) is dup", sm.me, op.ClerkId, op.OpId)
-		isDup = true
-	}
-
-	if isDup {
-		sm.mu.Unlock()
-		if sm.waitUntilExecutedOrTimeout(op) {
-			sm.mu.Lock()
-			latestConfig := sm.configs[len(sm.configs)-1]
-			if op.ConfigNum == -1 || op.ConfigNum > latestConfig.Num {
-				reply.Config = latestConfig
-			} else {
-				reply.Config = sm.configs[op.ConfigNum]
-			}
-			sm.mu.Unlock()
-
-			reply.Err = OK
-			println("S%v replies Query (C=%v Id=%v)", sm.me, op.ClerkId, op.OpId)
-
-		} else {
-			reply.Err = ErrNotExecuted
-		}
-		return nil
-	}
-	// not a dup request.
-
-	// update server state.
-	if opId, exist := sm.maxRecvOpIdFromClerk[op.ClerkId]; !exist || opId < op.OpId {
-		sm.maxRecvOpIdFromClerk[op.ClerkId] = op.OpId
-	}
-	sm.mu.Unlock()
-
-	// start proposing the op.
-	go sm.propose(op)
-
-	// wait until the op is executed or timeout.
-	if sm.waitUntilExecutedOrTimeout(op) {
-		sm.mu.Lock()
-		latestConfig := sm.configs[len(sm.configs)-1]
-		if op.ConfigNum == -1 || op.ConfigNum > latestConfig.Num {
-			reply.Config = latestConfig
-		} else {
-			reply.Config = sm.configs[op.ConfigNum]
-		}
-		sm.mu.Unlock()
-
-		reply.Err = OK
-		println("S%v replies Query (C=%v Id=%v)", sm.me, op.ClerkId, op.OpId)
-
-	} else {
-		reply.Err = ErrNotExecuted
-	}
-
-	return nil
 }
 
 // please don't change these two functions.
@@ -722,10 +487,11 @@ func StartServer(servers []string, me int) *ShardMaster {
 	sm := new(ShardMaster)
 	sm.me = me
 	sm.mu = sync.Mutex{}
+
 	sm.nextAllocSeqNum = 0
 	sm.nextExecSeqNum = 0
-	sm.maxRecvOpIdFromClerk = make(map[int64]int)
-	sm.maxExecOpIdOfClerk = make(map[int64]int)
+	sm.maxPropOpIdOfClerk = make(map[int64]int)
+	sm.maxApplyOpIdOfClerk = make(map[int64]int)
 	sm.decidedOps = make(map[int]Op)
 	sm.hasNewDecidedOp = *sync.NewCond(&sm.mu)
 
@@ -752,8 +518,8 @@ func StartServer(servers []string, me int) *ShardMaster {
 	// start the executor thread.
 	go sm.executor()
 
-	// please do not change any of the following code,
-	// or do anything to subvert it.
+	// start a thread to periodically propose no-ops in order to let the server catches up quickly.
+	go sm.noOpTicker()
 
 	go func() {
 		for !sm.isdead() {
