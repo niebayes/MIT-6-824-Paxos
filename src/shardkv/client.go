@@ -87,8 +87,8 @@ func (ck *Clerk) Get(key string) string {
 		// ask master for a new configuration.
 		ck.config = ck.sm.Query(-1)
 
-		println("C%v uses config (CN=%v)", ck.clerkId, ck.config.Num)
-		shardmaster.PrintGidToShards(&ck.config, DEBUG)
+		// println("C%v uses config (CN=%v)", ck.clerkId, ck.config.Num)
+		// shardmaster.PrintGidToShards(&ck.config, DEBUG)
 	}
 }
 
@@ -125,8 +125,8 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 		// ask master for a new configuration.
 		ck.config = ck.sm.Query(-1)
 
-		println("C%v uses config (CN=%v)", ck.clerkId, ck.config.Num)
-		shardmaster.PrintGidToShards(&ck.config, DEBUG)
+		// println("C%v uses config (CN=%v)", ck.clerkId, ck.config.Num)
+		// shardmaster.PrintGidToShards(&ck.config, DEBUG)
 	}
 }
 

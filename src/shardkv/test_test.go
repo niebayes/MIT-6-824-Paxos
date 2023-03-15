@@ -260,7 +260,7 @@ func TestMove(t *testing.T) {
 	}
 }
 
-// limp, which means damaged, means there woulf be some dead replicas.
+// limp, which means damaged, means there would be some dead replicas.
 // this test will kill a minority of servers and test if the cluster could handle
 // requests as normal.
 func TestLimp(t *testing.T) {
