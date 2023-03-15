@@ -18,11 +18,12 @@ import (
 
 const initSleepTime = 10 * time.Millisecond
 const maxSleepTime = 500 * time.Millisecond
+const proposeNoOpInterval = 250 * time.Millisecond
 
 type Op struct {
 	ClerkId int64
 	OpId    int
-	OpType  string // Get, Put, Append.
+	OpType  string // "Get", "Put", "Append", "NoOp".
 	Key     string
 	Value   string
 }
@@ -34,18 +35,22 @@ type KVPaxos struct {
 	dead       int32 // for testing
 	unreliable int32 // for testing
 	px         *paxos.Paxos
+
 	// key-value database.
 	db map[string]string
-	// the next sequence number to allocate for an op.
+
+	// in order to interact with paxos, the following fields must be used.
+
+	// the next sequence number to allocate for an op to be proposed.
 	nextAllocSeqNum int
 	// the sequence number of the next op to execute.
 	nextExecSeqNum int
-	// the maximum op ids received from each clerk.
-	// any request with op id less than the max id is regarded as a dup request.
-	maxRecvOpIdFromClerk map[int64]int
-	// the maximum op id of the executed ops of each clerk.
-	// any op with op id less than the max id won't be executed.
-	maxExecOpIdOfClerk map[int64]int
+	// the maximum op id among all the ops proposed for each clerk.
+	// any op with op id less than the max id is regarded as a dup op.
+	maxPropOpIdOfClerk map[int64]int
+	// the maximum op id among all the applied ops of each clerk.
+	// any op with op id less than the max id won't be applied.
+	maxApplyOpIdOfClerk map[int64]int
 	// all decided ops this server knows of.
 	// key: sequence number, value: the decided op.
 	decidedOps map[int]Op
@@ -53,184 +58,31 @@ type KVPaxos struct {
 	hasNewDecidedOp sync.Cond
 }
 
-func (kv *KVPaxos) allocateSeqNum() int {
-	kv.mu.Lock()
-	defer kv.mu.Unlock()
-
-	seqNum := kv.nextAllocSeqNum
-	kv.nextAllocSeqNum++
-	return seqNum
-}
-
-// wait until the paxos instance with sequence number sn decided.
-// return the decided value when decided.
-func (kv *KVPaxos) waitUntilDecided(seqNum int) interface{} {
-	lastSleepTime := initSleepTime
-	for !kv.isdead() {
-		status, decidedValue := kv.px.Status(seqNum)
-		if status != paxos.Pending {
-			// if forgotten, decidedValue will be nil.
-			// but this shall not happen since this value is forgotten only after
-			// this server has called Done on this value.
-			return decidedValue
-		}
-
-		// wait a while and retry.
-		sleepTime := lastSleepTime * backoffFactor
-		if sleepTime > maxSleepTime {
-			sleepTime = maxSleepTime
-		}
-		time.Sleep(sleepTime)
-		lastSleepTime = sleepTime
-	}
-
-	// TODO: change to returns a no-op.
-	return nil
-
-	// warning: the test suites will call `cleanup` upon termination which will kill the server.
-	// it's possible that `waitUntilDecided` exits prior to the termination of `propose`.
-	// in such a case, `decidedOp := kv.waitUntilDecided(seqNum).(Op)` would panic since a nil
-	// is returned from `waitUntilDecided`.
-	// to workaround such an issue, we choose to return a no-op instead of a nil.
-	// return Op{OpType: "NoOp"}
-}
-
-func (kv *KVPaxos) executeOp(op *Op) {
-	switch op.OpType {
-	case "Get":
-		// only write ops are applied to the database.
-
-	case "Put":
-		kv.db[op.Key] = op.Value
-
-	case "Append":
-		kv.db[op.Key] += op.Value
-
-	default:
-		log.Fatalf("unexpected op type %v", op.OpType)
-	}
-}
-
-func (kv *KVPaxos) executor() {
-	kv.mu.Lock()
-	for !kv.isdead() {
-		op, decided := kv.decidedOps[kv.nextExecSeqNum]
-		if decided {
-			// execute the decided op if it is not executed yet.
-			// this ensures the same op won't be execute more than once by a server.
-			// the same op might be executed more than once if different servers proposes the same
-			// request at different sequence numbers and happens they are all decided.
-			// there's no ways to avoid such case since the paxos has the ability to decide multiple values
-			// at the same time.
-			if opId, exist := kv.maxExecOpIdOfClerk[op.ClerkId]; !exist || opId < op.OpId {
-				kv.executeOp(&op)
-				printf("S%v executes op (C=%v Id=%v) at N=%v", kv.me, op.ClerkId, op.OpId, kv.nextExecSeqNum)
-			}
-
-			// tell the paxos peer that this op is done.
-			kv.px.Done(kv.nextExecSeqNum)
-
-			// free server state.
-			delete(kv.decidedOps, kv.nextExecSeqNum)
-
-			// update server state.
-			kv.nextExecSeqNum++
-			if kv.nextExecSeqNum > kv.nextAllocSeqNum {
-				kv.nextAllocSeqNum = kv.nextExecSeqNum
-			}
-			if opId, exist := kv.maxExecOpIdOfClerk[op.ClerkId]; !exist || opId < op.OpId {
-				kv.maxExecOpIdOfClerk[op.ClerkId] = op.OpId
-			}
-			if opId, exist := kv.maxRecvOpIdFromClerk[op.ClerkId]; !exist || opId < op.OpId {
-				kv.maxRecvOpIdFromClerk[op.ClerkId] = op.OpId
-			}
-
-			printf("S%v state (ASN=%v ESN=%v C=%v RId=%v EId=%v)", kv.me, kv.nextAllocSeqNum, kv.nextExecSeqNum, op.ClerkId, kv.maxRecvOpIdFromClerk[op.ClerkId], kv.maxExecOpIdOfClerk[op.ClerkId])
-
-		} else {
-			kv.hasNewDecidedOp.Wait()
-		}
-	}
-	kv.mu.Unlock()
-}
-
-func (kv *KVPaxos) propose(op *Op) {
-	for !kv.isdead() {
-		// choose a sequence number for the op.
-		seqNum := kv.allocateSeqNum()
-
-		// starts proposing the op at this sequence number.
-		kv.px.Start(seqNum, *op)
-		printf("S%v starts proposing op (C=%v Id=%v) at N=%v", kv.me, op.ClerkId, op.OpId, seqNum)
-
-		// wait until the paxos instance with this sequence number is decided.
-		decidedOp := kv.waitUntilDecided(seqNum).(Op)
-		printf("S%v knows op (C=%v Id=%v) is decided at N=%v", kv.me, decidedOp.ClerkId, decidedOp.OpId, seqNum)
-
-		// store the decided op.
-		kv.mu.Lock()
-		kv.decidedOps[seqNum] = decidedOp
-
-		// update server state.
-		if opId, exist := kv.maxRecvOpIdFromClerk[decidedOp.ClerkId]; !exist || opId < decidedOp.OpId {
-			kv.maxRecvOpIdFromClerk[decidedOp.ClerkId] = decidedOp.OpId
-		}
-
-		// notify the executor thread.
-		kv.hasNewDecidedOp.Signal()
-
-		// it's our op chosen as the decided value at sequence number seqNum.
-		if decidedOp.ClerkId == op.ClerkId && decidedOp.OpId == op.OpId {
-			// end proposing.
-			printf("S%v ends proposing (C=%v Id=%v)", kv.me, decidedOp.ClerkId, decidedOp.OpId)
-			kv.mu.Unlock()
-			return
-		}
-		// another op is chosen as the decided value at sequence number seqNum.
-		// retry proposing the op at a different sequence number.
-		kv.mu.Unlock()
-	}
-}
-
-// return true if the op is executed before timeout.
-func (kv *KVPaxos) waitUntilExecutedOrTimeout(op *Op) bool {
-	startTime := time.Now()
-	for time.Since(startTime) < maxWaitTime {
-		kv.mu.Lock()
-		if opId, exist := kv.maxExecOpIdOfClerk[op.ClerkId]; exist && opId >= op.OpId {
-			kv.mu.Unlock()
-			return true
-		}
-		kv.mu.Unlock()
-		time.Sleep(100 * time.Millisecond)
-	}
-	return false
-}
-
 func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
 	kv.mu.Lock()
 
-	printf("S%v receives Get (C=%v Id=%v)", kv.me, args.ClerkId, args.OpId)
+	println("S%v receives Get (C=%v Id=%v)", kv.me, args.ClerkId, args.OpId)
 
 	// wrap the request into an op.
 	op := &Op{ClerkId: args.ClerkId, OpId: args.OpId, OpType: "Get", Key: args.Key}
 
 	// check if this is a dup request.
 	isDup := false
-	if opId, exist := kv.maxRecvOpIdFromClerk[op.ClerkId]; exist && opId >= op.OpId {
-		printf("S%v knows Get (C=%v Id=%v) is dup", kv.me, op.ClerkId, op.OpId)
+	if opId, exist := kv.maxPropOpIdOfClerk[op.ClerkId]; exist && opId >= op.OpId {
+		println("S%v knows Get (C=%v Id=%v) is dup", kv.me, op.ClerkId, op.OpId)
 		isDup = true
 	}
 
 	if isDup {
 		kv.mu.Unlock()
-		if kv.waitUntilExecutedOrTimeout(op) {
+		if kv.waitUntilAppliedOrTimeout(op) {
 			// simply return OK whatsoever since the clerk is able to differentiate between OK and ErrNoKey from the value.
-			printf("S%v replies Get (C=%v Id=%v)", kv.me, op.ClerkId, op.OpId)
 			reply.Err = OK
 			kv.mu.Lock()
 			reply.Value = kv.db[op.Key]
 			kv.mu.Unlock()
+
+			println("S%v replies Get (C=%v Id=%v)", kv.me, op.ClerkId, op.OpId)
 
 		} else {
 			reply.Err = ErrNotExecuted
@@ -240,8 +92,8 @@ func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
 	// not a dup request.
 
 	// update server state.
-	if opId, exist := kv.maxRecvOpIdFromClerk[op.ClerkId]; !exist || opId < op.OpId {
-		kv.maxRecvOpIdFromClerk[op.ClerkId] = op.OpId
+	if opId, exist := kv.maxPropOpIdOfClerk[op.ClerkId]; !exist || opId < op.OpId {
+		kv.maxPropOpIdOfClerk[op.ClerkId] = op.OpId
 	}
 	kv.mu.Unlock()
 
@@ -249,13 +101,14 @@ func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
 	go kv.propose(op)
 
 	// wait until the op is executed or timeout.
-	if kv.waitUntilExecutedOrTimeout(op) {
+	if kv.waitUntilAppliedOrTimeout(op) {
 		// simply return OK whatsoever since the clerk is able to differentiate between OK and ErrNoKey from the value.
-		printf("S%v replies Get (C=%v Id=%v)", kv.me, op.ClerkId, op.OpId)
 		reply.Err = OK
 		kv.mu.Lock()
 		reply.Value = kv.db[op.Key]
 		kv.mu.Unlock()
+
+		println("S%v replies Get (C=%v Id=%v)", kv.me, op.ClerkId, op.OpId)
 
 	} else {
 		reply.Err = ErrNotExecuted
@@ -267,24 +120,24 @@ func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
 func (kv *KVPaxos) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error {
 	kv.mu.Lock()
 
-	printf("S%v receives PutAppend (C=%v Id=%v)", kv.me, args.ClerkId, args.OpId)
+	println("S%v receives PutAppend (C=%v Id=%v)", kv.me, args.ClerkId, args.OpId)
 
 	// wrap the request into an op.
 	op := &Op{ClerkId: args.ClerkId, OpId: args.OpId, OpType: args.OpType, Key: args.Key, Value: args.Value}
 
 	// check if this is a dup request.
 	isDup := false
-	if opId, exist := kv.maxRecvOpIdFromClerk[op.ClerkId]; exist && opId >= op.OpId {
-		printf("S%v knows PutAppend (C=%v Id=%v) is dup", kv.me, op.ClerkId, op.OpId)
+	if opId, exist := kv.maxPropOpIdOfClerk[op.ClerkId]; exist && opId >= op.OpId {
+		println("S%v knows PutAppend (C=%v Id=%v) is dup", kv.me, op.ClerkId, op.OpId)
 		isDup = true
 	}
 
 	if isDup {
 		kv.mu.Unlock()
-		if kv.waitUntilExecutedOrTimeout(op) {
-			// simply return OK whatsoever since the clerk is able to differentiate between OK and ErrNoKey from the value.
-			printf("S%v replies PutAppend (C=%v Id=%v)", kv.me, op.ClerkId, op.OpId)
+		if kv.waitUntilAppliedOrTimeout(op) {
 			reply.Err = OK
+
+			println("S%v replies PutAppend (C=%v Id=%v)", kv.me, op.ClerkId, op.OpId)
 
 		} else {
 			reply.Err = ErrNotExecuted
@@ -294,8 +147,8 @@ func (kv *KVPaxos) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error {
 	// not a dup request.
 
 	// update server state.
-	if opId, exist := kv.maxRecvOpIdFromClerk[op.ClerkId]; !exist || opId < op.OpId {
-		kv.maxRecvOpIdFromClerk[op.ClerkId] = op.OpId
+	if opId, exist := kv.maxPropOpIdOfClerk[op.ClerkId]; !exist || opId < op.OpId {
+		kv.maxPropOpIdOfClerk[op.ClerkId] = op.OpId
 	}
 	kv.mu.Unlock()
 
@@ -303,16 +156,100 @@ func (kv *KVPaxos) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error {
 	go kv.propose(op)
 
 	// wait until the op is executed or timeout.
-	if kv.waitUntilExecutedOrTimeout(op) {
-		// simply return OK whatsoever since the clerk is able to differentiate between OK and ErrNoKey from the value.
-		printf("S%v replies PutAppend (C=%v Id=%v)", kv.me, op.ClerkId, op.OpId)
+	if kv.waitUntilAppliedOrTimeout(op) {
 		reply.Err = OK
+
+		println("S%v replies PutAppend (C=%v Id=%v)", kv.me, op.ClerkId, op.OpId)
 
 	} else {
 		reply.Err = ErrNotExecuted
 	}
 
 	return nil
+}
+
+func (kv *KVPaxos) executor() {
+	kv.mu.Lock()
+	for !kv.isdead() {
+		op, decided := kv.decidedOps[kv.nextExecSeqNum]
+		if decided {
+			if kv.isNoOp(&op) {
+				// skip no-ops.
+
+			} else {
+				kv.maybeApplyClientOp(&op)
+			}
+
+			// tell the paxos peer that this op is done and free server state.
+			// if an op is not applied this time, it will never get applied.
+			// however, a new op constructed from the same request is allowed to get applied in future.
+			// therefore, this delete is safe.
+			kv.px.Done(kv.nextExecSeqNum)
+
+			// free server state.
+			delete(kv.decidedOps, kv.nextExecSeqNum)
+
+			// update server state.
+			kv.nextExecSeqNum++
+			if kv.nextExecSeqNum > kv.nextAllocSeqNum {
+				// although each server executes the decided ops independently,
+				// a server may see ops proposed by other servers.
+				// if the server proposes an op with a stale seq num, than the op would never get
+				// decided.
+				// hence, we need to update the seq num so that the server has more chance to
+				// allocate a large-enough seq num to let the op get decided.
+				kv.nextAllocSeqNum = kv.nextExecSeqNum
+			}
+
+			// println("S%v state (ASN=%v ESN=%v C=%v RId=%v EId=%v)", kv.me, kv.nextAllocSeqNum, kv.nextExecSeqNum, op.ClerkId, kv.maxPropOpIdOfClerk[op.ClerkId], kv.maxPropOpIdOfClerk[op.ClerkId])
+
+		} else {
+			kv.hasNewDecidedOp.Wait()
+		}
+	}
+	kv.mu.Unlock()
+}
+
+func (kv *KVPaxos) maybeApplyClientOp(op *Op) {
+	// apply the client op if it's not executed previously and the server is serving the shard.
+	if opId, exist := kv.maxApplyOpIdOfClerk[op.ClerkId]; !exist || opId < op.OpId {
+		kv.applyClientOp(op)
+
+		// update the max applied op for each clerk to implement the at-most-once semantics.
+		kv.maxApplyOpIdOfClerk[op.ClerkId] = op.OpId
+
+		println("S%v applied client op (C=%v Id=%v) at N=%v", kv.me, op.ClerkId, op.OpId, kv.nextExecSeqNum)
+	}
+}
+
+func (kv *KVPaxos) applyClientOp(op *Op) {
+	switch op.OpType {
+	case "Get":
+		// only write ops are applied to the database.
+
+	case "Put":
+		kv.db[op.Key] = op.Value
+
+	case "Append":
+		// note: the default value is returned if the key does not exist.
+		kv.db[op.Key] += op.Value
+
+	default:
+		log.Fatalf("unexpected client op type %v", op.OpType)
+	}
+}
+
+func (kv *KVPaxos) isNoOp(op *Op) bool {
+	return op.OpType == "NoOp"
+}
+
+func (kv *KVPaxos) noOpTicker() {
+	for !kv.isdead() {
+		op := &Op{OpType: "NoOp"}
+		go kv.propose(op)
+
+		time.Sleep(proposeNoOpInterval)
+	}
 }
 
 // tell the server to shut itself down.
@@ -353,11 +290,13 @@ func StartServer(servers []string, me int) *KVPaxos {
 	kv := new(KVPaxos)
 	kv.me = me
 	kv.mu = sync.Mutex{}
+
 	kv.db = make(map[string]string)
+
 	kv.nextAllocSeqNum = 0
 	kv.nextExecSeqNum = 0
-	kv.maxRecvOpIdFromClerk = make(map[int64]int)
-	kv.maxExecOpIdOfClerk = make(map[int64]int)
+	kv.maxPropOpIdOfClerk = make(map[int64]int)
+	kv.maxApplyOpIdOfClerk = make(map[int64]int)
 	kv.decidedOps = make(map[int]Op)
 	kv.hasNewDecidedOp = *sync.NewCond(&kv.mu)
 
@@ -369,6 +308,9 @@ func StartServer(servers []string, me int) *KVPaxos {
 	// start the executor thread.
 	go kv.executor()
 
+	// start a thread to periodically propose no-ops in order to let the server catches up quickly.
+	go kv.noOpTicker()
+
 	os.Remove(servers[me])
 	l, e := net.Listen("unix", servers[me])
 	if e != nil {
@@ -376,20 +318,17 @@ func StartServer(servers []string, me int) *KVPaxos {
 	}
 	kv.l = l
 
-	// please do not change any of the following code,
-	// or do anything to subvert it.
-
 	go func() {
 		for !kv.isdead() {
 			conn, err := kv.l.Accept()
 			if err == nil && !kv.isdead() {
 				if kv.isunreliable() && (rand.Int63()%1000) < 100 {
 					// discard the request.
-					printf("S%v discards a request", me)
+					println("S%v discards a request", me)
 					conn.Close()
 				} else if kv.isunreliable() && (rand.Int63()%1000) < 200 {
 					// process the request but force discard of reply.
-					printf("S%v discards a reply", me)
+					println("S%v discards a reply", me)
 					c1 := conn.(*net.UnixConn)
 					f, _ := c1.File()
 					err := syscall.Shutdown(int(f.Fd()), syscall.SHUT_WR)

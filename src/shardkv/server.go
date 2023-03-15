@@ -250,12 +250,6 @@ func (kv *ShardKV) executor() {
 
 			} else {
 				kv.maybeApplyClientOp(&op)
-
-				if opId, exist := kv.maxPropOpIdOfClerk[op.ClerkId]; !exist || opId < op.OpId {
-					// update the max proposed op id the server has ever seen to support
-					// dup checking and filtering.
-					kv.maxPropOpIdOfClerk[op.ClerkId] = op.OpId
-				}
 			}
 
 			// tell the paxos peer that this op is done and free server state.

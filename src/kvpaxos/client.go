@@ -60,25 +60,25 @@ func (ck *Clerk) Get(key string) string {
 
 	lastWaitTime := initWaitTime
 
-	printf("C%v starts sending Get (Id=%v K=%v)", args.ClerkId, args.OpId, args.Key)
+	println("C%v starts sending Get (Id=%v K=%v)", args.ClerkId, args.OpId, args.Key)
 
 	serverId := ck.lastAliveServerId
 
 	for {
 		// at first, try to send the request to the server the last time successfully sent the request to.
 		// if it fails, try other servers in a row.
-		printf("C%v sends Get (Id=%v K=%v) to S%v", args.ClerkId, args.OpId, args.Key, ck.servers[serverId])
+		println("C%v sends Get (Id=%v K=%v) to S%v", args.ClerkId, args.OpId, args.Key, ck.servers[serverId])
 
 		if call(ck.servers[serverId], "KVPaxos.Get", args, reply) {
 			ck.lastAliveServerId = serverId
-			printf("C%v receives Get reply (Id=%v E=%v K=%v V=%v) from S%v", ck.clerkId, args.OpId, reply.Err, args.Key, reply.Value, ck.servers[serverId])
+			println("C%v receives Get reply (Id=%v E=%v K=%v V=%v) from S%v", ck.clerkId, args.OpId, reply.Err, args.Key, reply.Value, ck.servers[serverId])
 
 			if reply.Err == OK {
 				return reply.Value
 			}
 
 		} else {
-			printf("C%v failed to contact with S%v", ck.clerkId, ck.servers[serverId])
+			println("C%v failed to contact with S%v", ck.clerkId, ck.servers[serverId])
 			serverId = (serverId + 1) % len(ck.servers)
 		}
 
@@ -99,25 +99,25 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 
 	lastWaitTime := initWaitTime
 
-	printf("C%v starts sending PutAppend (Id=%v T=%v K=%v V=%v)", args.ClerkId, args.OpId, args.OpType, args.Key, args.Value)
+	println("C%v starts sending PutAppend (Id=%v T=%v K=%v V=%v)", args.ClerkId, args.OpId, args.OpType, args.Key, args.Value)
 
 	serverId := ck.lastAliveServerId
 
 	for {
 		// at first, try to send the request to the server the last time successfully sent the request to.
 		// if it fails, try other servers in a row.
-		printf("C%v sends PutAppend (Id=%v T=%v K=%v V=%v) to S%v", args.ClerkId, args.OpId, args.OpType, args.Key, args.Value, ck.servers[serverId])
+		println("C%v sends PutAppend (Id=%v T=%v K=%v V=%v) to S%v", args.ClerkId, args.OpId, args.OpType, args.Key, args.Value, ck.servers[serverId])
 
 		if call(ck.servers[serverId], "KVPaxos.PutAppend", args, reply) {
 			ck.lastAliveServerId = serverId
-			printf("C%v receives PutAppend reply (Id=%v E=%v) from S%v", ck.clerkId, args.OpId, reply.Err, ck.servers[serverId])
+			println("C%v receives PutAppend reply (Id=%v E=%v) from S%v", ck.clerkId, args.OpId, reply.Err, ck.servers[serverId])
 
 			if reply.Err == OK {
 				return
 			}
 
 		} else {
-			printf("C%v failed to contact with S%v", ck.clerkId, ck.servers[serverId])
+			println("C%v failed to contact with S%v", ck.clerkId, ck.servers[serverId])
 			serverId = (serverId + 1) % len(ck.servers)
 		}
 

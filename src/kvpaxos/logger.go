@@ -6,7 +6,7 @@ import (
 
 const DEBUG = false
 
-func printf(format string, a ...interface{}) {
+func println(format string, a ...interface{}) {
 	// print iff debug is set.
 	if DEBUG {
 		format += "\n"
