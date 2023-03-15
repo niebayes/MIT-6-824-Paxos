@@ -102,7 +102,13 @@ func (sm *ShardMaster) waitUntilDecided(seqNum int) interface{} {
 		time.Sleep(sleepTime)
 		lastSleepTime = sleepTime
 	}
-	return nil
+
+	// warning: the test suites will call `cleanup` upon termination which will kill the server.
+	// it's possible that `waitUntilDecided` exits prior to the termination of `propose`.
+	// in such a case, `decidedOp := kv.waitUntilDecided(seqNum).(Op)` would panic since a nil
+	// is returned from `waitUntilDecided`.
+	// to workaround such an issue, we choose to return a no-op instead of a nil.
+	return Op{OpType: "NoOp"}
 }
 
 type GidAndShards struct {

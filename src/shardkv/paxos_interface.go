@@ -23,7 +23,7 @@ func isSameOp(opX *Op, opY *Op) bool {
 	// comparing clerk id and op id is used to compare two client ops.
 	// comparing config num is used to compare two install config ops.
 	// comparing shard num is used to compare two install shard ops.
-	// it's okay the opX and opY that literally are not the same ops as long as they have the same 
+	// it's okay the opX and opY that literally are not the same ops as long as they have the same
 	// effect when they're executed.
 	return opX.OpType == opY.OpType && opX.ClerkId == opY.ClerkId && opX.OpId == opY.OpId && opX.Config.Num == opY.Config.Num && opX.Shard == opY.Shard
 }
@@ -87,7 +87,13 @@ func (kv *ShardKV) waitUntilDecided(seqNum int) interface{} {
 		time.Sleep(sleepTime)
 		lastSleepTime = sleepTime
 	}
-	return nil
+
+	// warning: the test suites will call `cleanup` upon termination which will kill the server.
+	// it's possible that `waitUntilDecided` exits prior to the termination of `propose`.
+	// in such a case, `decidedOp := kv.waitUntilDecided(seqNum).(Op)` would panic since a nil
+	// is returned from `waitUntilDecided`.
+	// to workaround such an issue, we choose to return a no-op instead of a nil.
+	return Op{OpType: "NoOp"}
 }
 
 func (kv *ShardKV) waitUntilAppliedOrTimeout(op *Op) bool {
