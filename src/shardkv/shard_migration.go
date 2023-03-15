@@ -197,7 +197,7 @@ func (kv *ShardKV) installShard(op *Op) {
 		}
 	}
 
-	// TODO: add op to notify servers in one group to start serve / not serve a shard.
+	// TODO: add op to notify servers in one group to start serve / not serve a shard. (This is not necessary).
 
 	println("S%v-%v starts serving shard (SN=%v)", kv.gid, kv.me, op.Shard)
 }

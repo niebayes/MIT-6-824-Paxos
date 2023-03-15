@@ -49,8 +49,6 @@ func key2shard(key string) int {
 	return shard
 }
 
-// TODO: migrate request retry in kvpaxos client.go to here. (This is not necessary).
-
 // fetch the current value for a key.
 // returns "" if the key does not exist.
 // keeps trying forever in the face of all other errors.

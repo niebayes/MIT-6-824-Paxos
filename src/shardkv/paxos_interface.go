@@ -7,8 +7,6 @@ import "6.824/src/paxos"
 // this file contains codes for interacting with paxos.
 //
 
-// TODO: apply change on paxos interface to kvpaxos and test it first.
-
 func (kv *ShardKV) allocateSeqNum() int {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
