@@ -69,6 +69,8 @@ func (ck *Clerk) Get(key string) string {
 		if ok {
 			// try each server in the shard's replication group.
 			for _, srv := range servers {
+				println("C%v sends Get (Id=%v K=%v) to G%v S%v", args.ClerkId, args.OpId, args.Key, gid, srv)
+
 				var reply GetReply
 				ok := call(srv, "ShardKV.Get", args, &reply)
 				if ok && reply.Err == OK {
@@ -84,6 +86,9 @@ func (ck *Clerk) Get(key string) string {
 
 		// ask master for a new configuration.
 		ck.config = ck.sm.Query(-1)
+
+		println("C%v uses config (CN=%v)", ck.clerkId, ck.config.Num)
+		shardmaster.PrintGidToShards(&ck.config, DEBUG)
 	}
 }
 
@@ -102,6 +107,8 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 		if ok {
 			// try each server in the shard's replication group.
 			for _, srv := range servers {
+				println("C%v sends PutAppend (Id=%v T=%v K=%v V=%v) to G%v S%v", args.ClerkId, args.OpId, args.OpType, args.Key, args.Value, gid, srv)
+
 				var reply PutAppendReply
 				ok := call(srv, "ShardKV.PutAppend", args, &reply)
 				if ok && reply.Err == OK {
@@ -117,6 +124,9 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 
 		// ask master for a new configuration.
 		ck.config = ck.sm.Query(-1)
+
+		println("C%v uses config (CN=%v)", ck.clerkId, ck.config.Num)
+		shardmaster.PrintGidToShards(&ck.config, DEBUG)
 	}
 }
 

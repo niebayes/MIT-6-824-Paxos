@@ -38,10 +38,3 @@ type PutAppendArgs struct {
 type PutAppendReply struct {
 	Err Err
 }
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}

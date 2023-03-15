@@ -24,6 +24,7 @@ func (kv *ShardKV) makeInstallShardArgs(shard int) InstallShardArgs {
 	shardDB := kv.shardDBs[shard]
 
 	args := InstallShardArgs{
+		ConfigNum:           kv.config.Num,
 		Shard:               shard,
 		DB:                  make(map[string]string),
 		MaxApplyOpIdOfClerk: make(map[int64]int),
@@ -69,6 +70,8 @@ func (kv *ShardKV) handoffShards(configNum int) {
 
 				args := kv.makeInstallShardArgs(shard)
 				go kv.sendShard(&args, kv.shardDBs[shard].toGid)
+
+				println("S%v-%v sends shard (SN=%v) to G%v", kv.gid, kv.me, shard, kv.shardDBs[shard].toGid)
 			}
 		}
 
@@ -81,7 +84,7 @@ func (kv *ShardKV) handoffShards(configNum int) {
 		time.Sleep(handoffShardsInterval)
 	}
 
-	println("S%v done handing off shards", kv.me)
+	println("S%v-%v done handing off shards", kv.gid, kv.me)
 }
 
 func (kv *ShardKV) checkMigrationState(configNum int) {
@@ -103,7 +106,7 @@ func (kv *ShardKV) checkMigrationState(configNum int) {
 
 		if !migrating {
 			kv.reconfiguring = false
-			println("S%v reconfigure done (CN=%v)", kv.me, kv.config.Num)
+			println("S%v-%v reconfigure done (CN=%v)", kv.gid, kv.me, kv.config.Num)
 			kv.mu.Unlock()
 			break
 		}
@@ -139,6 +142,8 @@ func (kv *ShardKV) sendShard(args *InstallShardArgs, gid int64) {
 			// note: if used the pull-based migration, the logic in the sender side would be more complicated.
 			kv.shardDBs[args.Shard].state = NotServing
 			kv.mu.Unlock()
+
+			println("S%v-%v starts not serving shard (SN=%v)", kv.gid, kv.me, args.Shard)
 			break
 		}
 	}
@@ -148,22 +153,23 @@ func (kv *ShardKV) sendShard(args *InstallShardArgs, gid int64) {
 
 func (kv *ShardKV) InstallShard(args *InstallShardArgs, reply *InstallShardReply) error {
 	kv.mu.Lock()
+	defer kv.mu.Unlock()
 
 	// reject the shard since the receiver and the sender are not in the same config.
 	if args.ConfigNum != kv.config.Num {
 		reply.Err = ErrNotProposed
-		println("S%v rejects Install Shard due to inconsistent config (CN=%v SN=%v)", kv.me, args.ConfigNum, args.Shard)
+		println("S%v-%v rejects InstallShard due to inconsistent config (CN=%v ACN=%v SN=%v)", kv.gid, kv.me, kv.config.Num, args.ConfigNum, args.Shard)
 		return nil
 	}
 
 	// reject the shard since the receiver has installed the shard.
 	if kv.shardDBs[args.Shard].state != MovingIn {
 		reply.Err = OK
-		println("S%v rejects Install Shard due to already installed (CN=%v SN=%v)", kv.me, args.ConfigNum, args.Shard)
+		println("S%v-%v rejects InstallShard due to already installed (ACN=%v SN=%v)", kv.gid, kv.me, args.ConfigNum, args.Shard)
 		return nil
 	}
 
-	kv.mu.Unlock()
+	println("S%v-%v accepts InstallShard (ACN=%v SN=%v)", kv.gid, kv.me, args.ConfigNum, args.Shard)
 
 	// note, there's a gap between the proposing of the op and the execution of the op.
 	// we could filter the dup op in order to reject the shard during the gap.
@@ -180,6 +186,18 @@ func (kv *ShardKV) InstallShard(args *InstallShardArgs, reply *InstallShardReply
 }
 
 func (kv *ShardKV) installShard(op *Op) {
+	// install server state.
 	kv.shardDBs[op.Shard].dB = op.DB
 	kv.shardDBs[op.Shard].state = Serving
+
+	// update clerk state.
+	for clerkId, otherOpId := range op.MaxApplyOpIdOfClerk {
+		if opId, exist := kv.maxApplyOpIdOfClerk[clerkId]; !exist || otherOpId > opId {
+			kv.maxApplyOpIdOfClerk[clerkId] = otherOpId
+		}
+	}
+
+	// TODO: add op to notify servers in one group to start serve / not serve a shard.
+
+	println("S%v-%v starts serving shard (SN=%v)", kv.gid, kv.me, op.Shard)
 }

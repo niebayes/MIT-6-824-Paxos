@@ -7,6 +7,8 @@ import "6.824/src/paxos"
 // this file contains codes for interacting with paxos.
 //
 
+// TODO: apply change on paxos interface to kvpaxos and test it first.
+
 func (kv *ShardKV) allocateSeqNum() int {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
@@ -16,6 +18,16 @@ func (kv *ShardKV) allocateSeqNum() int {
 	return seqNum
 }
 
+func isSameOp(opX *Op, opY *Op) bool {
+	// comparing op types is used to compare two no-ops.
+	// comparing clerk id and op id is used to compare two client ops.
+	// comparing config num is used to compare two install config ops.
+	// comparing shard num is used to compare two install shard ops.
+	// it's okay the opX and opY that literally are not the same ops as long as they have the same 
+	// effect when they're executed.
+	return opX.OpType == opY.OpType && opX.ClerkId == opY.ClerkId && opX.OpId == opY.OpId && opX.Config.Num == opY.Config.Num && opX.Shard == opY.Shard
+}
+
 func (kv *ShardKV) propose(op *Op) {
 	for !kv.isdead() {
 		// choose a sequence number for the op.
@@ -23,11 +35,11 @@ func (kv *ShardKV) propose(op *Op) {
 
 		// starts proposing the op at this sequence number.
 		kv.px.Start(seqNum, *op)
-		println("S%v starts proposing op (C=%v Id=%v) at N=%v", kv.me, op.ClerkId, op.OpId, seqNum)
+		println("S%v-%v starts proposing op (T=%v SN=%v C=%v Id=%v) at N=%v", kv.gid, kv.me, op.OpType, op.Shard, op.ClerkId, op.OpId, seqNum)
 
 		// wait until the paxos instance with this sequence number is decided.
 		decidedOp := kv.waitUntilDecided(seqNum).(Op)
-		println("S%v knows op (C=%v Id=%v) is decided at N=%v", kv.me, decidedOp.ClerkId, decidedOp.OpId, seqNum)
+		println("S%v-%v knows op (T=%v C=%v Id=%v) is decided at N=%v", kv.gid, kv.me, decidedOp.OpType, decidedOp.ClerkId, decidedOp.OpId, seqNum)
 
 		// store the decided op.
 		kv.mu.Lock()
@@ -42,9 +54,9 @@ func (kv *ShardKV) propose(op *Op) {
 		kv.hasNewDecidedOp.Signal()
 
 		// it's our op chosen as the decided value at sequence number seqNum.
-		if decidedOp.ClerkId == op.ClerkId && decidedOp.OpId == op.OpId {
+		if isSameOp(op, &decidedOp) {
 			// end proposing.
-			println("S%v ends proposing (C=%v Id=%v)", kv.me, decidedOp.ClerkId, decidedOp.OpId)
+			println("S%v-%v ends proposing (T=%v C=%v Id=%v)", kv.gid, kv.me, decidedOp.OpType, decidedOp.ClerkId, decidedOp.OpId)
 			kv.mu.Unlock()
 			return
 		}

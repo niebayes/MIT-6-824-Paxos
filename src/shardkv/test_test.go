@@ -129,6 +129,7 @@ func TestBasic(t *testing.T) {
 	fmt.Printf("Test: Basic Join/Leave ...\n")
 
 	// join the group 0.
+	fmt.Printf("join G0\n")
 	tc.join(0)
 
 	ck := tc.clerk()
@@ -152,6 +153,7 @@ func TestBasic(t *testing.T) {
 	// after each join, check if the all the kv pairs can still be fetched,
 	// and the replied value is the expected one.
 	for g := 1; g < len(tc.groups); g++ {
+		fmt.Printf("join G%v\n", g)
 		tc.join(g)
 		time.Sleep(1 * time.Second)
 		for i := 0; i < len(keys); i++ {
@@ -169,6 +171,7 @@ func TestBasic(t *testing.T) {
 	// after each leave, check if the all the kv pairs can still be fetched,
 	// and the replied value is the expected one.
 	for g := 0; g < len(tc.groups)-1; g++ {
+		fmt.Printf("leave G%v\n", g)
 		tc.leave(g)
 		time.Sleep(1 * time.Second)
 		for i := 0; i < len(keys); i++ {
@@ -193,28 +196,35 @@ func TestMove(t *testing.T) {
 
 	fmt.Printf("Test: Shards really move ...\n")
 
+	fmt.Printf("Add G0\n")
 	tc.join(0)
+
+	time.Sleep(2 * time.Second)
 
 	ck := tc.clerk()
 
 	// insert one key per shard
 	for i := 0; i < shardmaster.NShards; i++ {
 		// ck.Put(string('0'+i), string('0'+i))
+		fmt.Printf("Put key %v\n", i)
 		ck.Put(strconv.Itoa(i), strconv.Itoa(i))
 	}
 
 	// add group 1.
+	fmt.Printf("Add G1\n")
 	tc.join(1)
 	time.Sleep(5 * time.Second)
 
 	// check that keys are still there.
 	for i := 0; i < shardmaster.NShards; i++ {
 		// if ck.Get(string('0'+i)) != string('0'+i) {
+		fmt.Printf("Get key %v\n", i)
 		if ck.Get(strconv.Itoa(i)) != strconv.Itoa(i) {
 			t.Fatalf("missing key/value")
 		}
 	}
 
+	fmt.Printf("Kill G0\n")
 	// remove sockets from group 0.
 	for _, port := range tc.groups[0].ports {
 		os.Remove(port)
@@ -227,6 +237,7 @@ func TestMove(t *testing.T) {
 			myck := tc.clerk()
 			// v := myck.Get(string('0' + me))
 			// if v == string('0'+me) {
+			fmt.Printf("Get key %v\n", me)
 			v := myck.Get(strconv.Itoa(me))
 			if v == strconv.Itoa(me) {
 				mu.Lock()

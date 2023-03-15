@@ -20,6 +20,7 @@ const initSleepTime = 10 * time.Millisecond
 const maxSleepTime = 500 * time.Millisecond
 const handoffShardsInterval = 200 * time.Millisecond
 const checkMigrationStateInterval = 200 * time.Millisecond
+const proposeNoOpInterval = 250 * time.Millisecond
 
 // TODO：尝试将 polling waiting to apply 改为 channel。当时是因为啥原因来着，一开始用了 channel，后来好像 close channel 不太懂，就没用了。
 // TODO: add doc for how i solve the two challenges in the 6.824 lab4.
@@ -29,7 +30,7 @@ const checkMigrationStateInterval = 200 * time.Millisecond
 type Op struct {
 	ClerkId             int64
 	OpId                int
-	OpType              string // "Get", "Put", "Append", "InstallConfig", "InstallShard".
+	OpType              string // "Get", "Put", "Append", "InstallConfig", "InstallShard", "NoOp".
 	Key                 string
 	Value               string
 	Config              shardmaster.Config // the config to be installed.
@@ -108,11 +109,11 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) error {
 	if !kv.isServingKey(args.Key) {
 		kv.mu.Unlock()
 		reply.Err = ErrWrongGroup
-		println("S%v rejects Get (C=%v Id=%v)", kv.me, args.ClerkId, args.OpId)
+		println("S%v-%v rejects Get (C=%v Id=%v)", kv.gid, kv.me, args.ClerkId, args.OpId)
 		return nil
 	}
 
-	println("S%v accepts Get (C=%v Id=%v)", kv.me, args.ClerkId, args.OpId)
+	println("S%v-%v accepts Get (C=%v Id=%v)", kv.gid, kv.me, args.ClerkId, args.OpId)
 
 	// wrap the request into an op.
 	op := &Op{ClerkId: args.ClerkId, OpId: args.OpId, OpType: "Get", Key: args.Key}
@@ -121,7 +122,7 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) error {
 	isDup := false
 	if opId, exist := kv.maxPropOpIdOfClerk[op.ClerkId]; exist && opId >= op.OpId {
 		isDup = true
-		println("S%v knows Get (C=%v Id=%v) is dup", kv.me, op.ClerkId, op.OpId)
+		println("S%v-%v knows Get (C=%v Id=%v) is dup", kv.gid, kv.me, op.ClerkId, op.OpId)
 	}
 
 	if isDup {
@@ -133,7 +134,7 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) error {
 			reply.Value = kv.shardDBs[key2shard(op.Key)].dB[op.Key]
 			kv.mu.Unlock()
 
-			println("S%v replies Get (C=%v Id=%v)", kv.me, op.ClerkId, op.OpId)
+			println("S%v-%v replies Get (C=%v Id=%v)", kv.gid, kv.me, op.ClerkId, op.OpId)
 
 		} else {
 			// it's not necessary to differentiate between ErrNotExecuted and ErrWrongGroup here.
@@ -169,7 +170,7 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) error {
 		reply.Value = kv.shardDBs[key2shard(op.Key)].dB[op.Key]
 		kv.mu.Unlock()
 
-		println("S%v replies Get (C=%v Id=%v)", kv.me, op.ClerkId, op.OpId)
+		println("S%v-%v replies Get (C=%v Id=%v)", kv.gid, kv.me, op.ClerkId, op.OpId)
 
 	} else {
 		reply.Err = ErrNotExecuted
@@ -185,11 +186,11 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error {
 	if !kv.isServingKey(args.Key) {
 		kv.mu.Unlock()
 		reply.Err = ErrWrongGroup
-		println("S%v rejects PutAppend (C=%v Id=%v)", kv.me, args.ClerkId, args.OpId)
+		println("S%v-%v rejects PutAppend (C=%v Id=%v)", kv.gid, kv.me, args.ClerkId, args.OpId)
 		return nil
 	}
 
-	println("S%v accepts PutAppend (C=%v Id=%v)", kv.me, args.ClerkId, args.OpId)
+	println("S%v-%v accepts PutAppend (C=%v Id=%v)", kv.gid, kv.me, args.ClerkId, args.OpId)
 
 	// wrap the request into an op.
 	op := &Op{ClerkId: args.ClerkId, OpId: args.OpId, OpType: args.OpType, Key: args.Key, Value: args.Value}
@@ -197,7 +198,7 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error {
 	// check if this is a dup request.
 	isDup := false
 	if opId, exist := kv.maxPropOpIdOfClerk[op.ClerkId]; exist && opId >= op.OpId {
-		println("S%v knows PutAppend (C=%v Id=%v) is dup", kv.me, op.ClerkId, op.OpId)
+		println("S%v-%v knows PutAppend (C=%v Id=%v) is dup", kv.gid, kv.me, op.ClerkId, op.OpId)
 		isDup = true
 	}
 
@@ -205,7 +206,7 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error {
 		kv.mu.Unlock()
 		if kv.waitUntilAppliedOrTimeout(op) {
 			reply.Err = OK
-			println("S%v knows PutAppend (C=%v Id=%v) was applied", kv.me, op.ClerkId, op.OpId)
+			println("S%v-%v knows PutAppend (C=%v Id=%v) was applied", kv.gid, kv.me, op.ClerkId, op.OpId)
 
 		} else {
 			reply.Err = ErrNotExecuted
@@ -227,7 +228,7 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error {
 	// wait until the op is executed or timeout.
 	if kv.waitUntilAppliedOrTimeout(op) {
 		reply.Err = OK
-		println("S%v knows PutAppend (C=%v Id=%v) was applied", kv.me, op.ClerkId, op.OpId)
+		println("S%v-%v knows PutAppend (C=%v Id=%v) was applied", kv.gid, kv.me, op.ClerkId, op.OpId)
 
 	} else {
 		reply.Err = ErrNotExecuted
@@ -241,8 +242,10 @@ func (kv *ShardKV) executor() {
 	for !kv.isdead() {
 		op, decided := kv.decidedOps[kv.nextExecSeqNum]
 		if decided {
-			// try to apply the decided op on the server.
-			if kv.isAdminOp(&op) {
+			if kv.isNoOp(&op) {
+				// skip no-ops.
+
+			} else if kv.isAdminOp(&op) {
 				kv.maybeApplyAdminOp(&op)
 
 			} else {
@@ -274,7 +277,7 @@ func (kv *ShardKV) executor() {
 				kv.nextAllocSeqNum = kv.nextExecSeqNum
 			}
 
-			println("S%v state (ASN=%v ESN=%v CN=%v C=%v RId=%v EId=%v)", kv.me, kv.nextAllocSeqNum, kv.nextExecSeqNum, kv.config.Num, op.ClerkId, kv.maxPropOpIdOfClerk[op.ClerkId], kv.maxApplyOpIdOfClerk[op.ClerkId])
+			// println("S%v-%v state (ASN=%v ESN=%v CN=%v C=%v PId=%v AId=%v)", kv.gid, kv.me, kv.nextAllocSeqNum, kv.nextExecSeqNum, kv.config.Num, op.ClerkId, kv.maxPropOpIdOfClerk[op.ClerkId], kv.maxApplyOpIdOfClerk[op.ClerkId])
 
 		} else {
 			kv.hasNewDecidedOp.Wait()
@@ -292,10 +295,12 @@ func (kv *ShardKV) maybeApplyAdminOp(op *Op) {
 	case "InstallConfig":
 		// install the config it's config num is one larger than the current config
 		// and the server is not reconfiguring.
-		if op.Config.Num == kv.config.Num+1 && !kv.reconfiguring {
+		// FIXME: seems it's not necessary to check if the server is reconfiguring.
+		if op.Config.Num == kv.config.Num+1 {
+			kv.reconfiguring = true
 			kv.installConfig(op.Config)
 
-			println("S%v applied InstallConfig op (CN=%v) at N=%v", kv.me, op.Config.Num, kv.nextExecSeqNum)
+			println("S%v-%v applied InstallConfig op (CN=%v) at N=%v", kv.gid, kv.me, op.Config.Num, kv.nextExecSeqNum)
 		}
 
 	case "InstallShard":
@@ -304,7 +309,13 @@ func (kv *ShardKV) maybeApplyAdminOp(op *Op) {
 		if kv.reconfiguring && kv.shardDBs[op.Shard].state == MovingIn {
 			kv.installShard(op)
 
-			println("S%v applied InstallShard op (CN=%v, SN=%v) at N=%v", kv.me, op.Config.Num, op.Shard, kv.nextExecSeqNum)
+			println("S%v-%v applied InstallShard op (CN=%v, SN=%v) at N=%v", kv.gid, kv.me, op.Config.Num, op.Shard, kv.nextExecSeqNum)
+		} else {
+			if !kv.reconfiguring {
+				println("S%v-%v rejects to apply InstallShard op (CN=%v, SN=%v) at N=%v due to not being reconfiguring", kv.gid, kv.me, op.Config.Num, op.Shard, kv.nextExecSeqNum)
+			} else {
+				println("S%v-%v rejects to apply InstallShard op (CN=%v, SN=%v) at N=%v due to State=%v", kv.gid, kv.me, op.Config.Num, op.Shard, kv.nextExecSeqNum, kv.shardDBs[op.Shard].state)
+			}
 		}
 
 	default:
@@ -320,7 +331,7 @@ func (kv *ShardKV) maybeApplyClientOp(op *Op) {
 		// update the max applied op for each clerk to implement the at-most-once semantics.
 		kv.maxApplyOpIdOfClerk[op.ClerkId] = op.OpId
 
-		println("S%v applied client op (C=%v Id=%v) at N=%v", kv.me, op.ClerkId, op.OpId, kv.nextExecSeqNum)
+		println("S%v-%v applied client op (C=%v Id=%v) at N=%v", kv.gid, kv.me, op.ClerkId, op.OpId, kv.nextExecSeqNum)
 	}
 }
 
@@ -342,6 +353,19 @@ func (kv *ShardKV) applyClientOp(op *Op) {
 
 	default:
 		log.Fatalf("unexpected client op type %v", op.OpType)
+	}
+}
+
+func (kv *ShardKV) isNoOp(op *Op) bool {
+	return op.OpType == "NoOp"
+}
+
+func (kv *ShardKV) noOpTicker() {
+	for !kv.isdead() {
+		op := &Op{OpType: "NoOp"}
+		go kv.propose(op)
+
+		time.Sleep(proposeNoOpInterval)
 	}
 }
 
@@ -384,21 +408,22 @@ func StartServer(gid int64, shardmasters []string,
 
 	kv := new(ShardKV)
 	kv.me = me
-	kv.gid = gid
 	kv.sm = shardmaster.MakeClerk(shardmasters)
 	kv.mu = sync.Mutex{}
+
+	kv.gid = gid
 	kv.config = shardmaster.Config{Num: 0}
 	kv.reconfiguring = false
+	for i := range kv.shardDBs {
+		kv.shardDBs[i].dB = make(map[string]string)
+	}
+
 	kv.nextAllocSeqNum = 0
 	kv.nextExecSeqNum = 0
 	kv.maxPropOpIdOfClerk = make(map[int64]int)
 	kv.maxApplyOpIdOfClerk = make(map[int64]int)
 	kv.decidedOps = make(map[int]Op)
 	kv.hasNewDecidedOp = *sync.NewCond(&kv.mu)
-
-	for i := range kv.shardDBs {
-		kv.shardDBs[i].dB = make(map[string]string)
-	}
 
 	rpcs := rpc.NewServer()
 	rpcs.Register(kv)
@@ -414,6 +439,9 @@ func StartServer(gid int64, shardmasters []string,
 
 	// start the executor thread.
 	go kv.executor()
+
+	// start a thread to periodically propose no-ops in order to let the server catches up quickly.
+	go kv.noOpTicker()
 
 	go func() {
 		for !kv.isdead() {

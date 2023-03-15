@@ -116,8 +116,8 @@ type Movement struct {
 	shards []int // moved shards.
 }
 
-func printGidToShards(config *Config) {
-	if !DEBUG {
+func PrintGidToShards(config *Config, debug bool) {
+	if !debug {
 		return
 	}
 
@@ -146,7 +146,7 @@ func printGidToShards(config *Config) {
 	sort.Slice(gidAndShardsArray, func(i, j int) bool { return gidAndShardsArray[i].gid < gidAndShardsArray[j].gid })
 
 	for _, gidAndShards := range gidAndShardsArray {
-		println("G%v: %v", gidAndShards.gid, gidAndShards.shards)
+		fmt.Printf("G%v: %v\n", gidAndShards.gid, gidAndShards.shards)
 	}
 }
 
@@ -154,7 +154,7 @@ func printGidToShards(config *Config) {
 // to the backing array and any modification on the copied slice header will be made on the backing array.
 func rebalanceShards(config *Config, isJoin bool, movedGid int64) {
 	println("####################\nBefore rebalaning:")
-	printGidToShards(config)
+	PrintGidToShards(config, DEBUG)
 
 	gidToShards := make(map[int64][]int)
 	for shard, gid := range config.Shards {
@@ -277,7 +277,7 @@ func rebalanceShards(config *Config, isJoin bool, movedGid int64) {
 	}
 
 	println("After rebalaning:")
-	printGidToShards(config)
+	PrintGidToShards(config, DEBUG)
 	println("####################")
 }
 
@@ -303,7 +303,7 @@ func (sm *ShardMaster) executeOp(op *Op) {
 				newConfig.Shards[shard] = op.GID
 			}
 			println("Assign all shards to G%v", op.GID)
-			printGidToShards(&newConfig)
+			PrintGidToShards(&newConfig, DEBUG)
 
 		} else {
 			// rebalance shards on replica groups.
@@ -350,7 +350,7 @@ func (sm *ShardMaster) executeOp(op *Op) {
 		// reassign the shard.
 		newConfig.Shards[op.Shard] = op.GID
 
-		printGidToShards(&newConfig)
+		PrintGidToShards(&newConfig, DEBUG)
 
 		sm.configs = append(sm.configs, newConfig)
 
