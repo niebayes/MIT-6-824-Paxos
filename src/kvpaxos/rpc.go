@@ -3,11 +3,10 @@ package kvpaxos
 type Err string
 
 const (
-	OK             = "OK"
-	ErrNotExecuted = "ErrNotExecuted"
+	OK            = "OK"
+	ErrNotApplied = "ErrNotApplied"
 )
 
-// Put or Append
 type PutAppendArgs struct {
 	ClerkId int64
 	OpId    int

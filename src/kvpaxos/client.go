@@ -11,7 +11,7 @@ import (
 // backoff params.
 const backoffFactor = 2
 const initWaitTime = 25 * time.Millisecond
-const maxWaitTime = 500 * time.Millisecond
+const maxWaitTime = 1000 * time.Millisecond
 
 type Clerk struct {
 	// host addresses of kv servers.
@@ -19,11 +19,6 @@ type Clerk struct {
 	// the id (index into servers array) of the server the clerk successfully sent request to.
 	lastAliveServerId int
 	// the id of this clerk.
-	// this id is generated from nrand on init.
-	// we assume the clerk ids of different clerks will not collide so that the paxos servers could
-	// differentiate between clerks.
-	// this and the subsequent nextOpId are used for the server to detect duplicate requests and
-	// to ensure the at-most-once semantics.
 	clerkId int64
 	// the next operation id to allocate.
 	nextOpId int
