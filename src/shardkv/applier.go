@@ -102,7 +102,7 @@ func (kv *ShardKV) maybeApplyAdminOp(op *Op) {
 		// 	kv.installConfig(op.Config)
 		// }
 
-		if op.Config.Num == kv.config.Num+1 && !kv.isMigrating() {
+		if (kv.reconfigureToConfigNum == op.Config.Num || op.Config.Num == kv.config.Num+1) && !kv.isMigrating() {
 			kv.reconfigureToConfigNum = op.Config.Num
 			kv.installConfig(op.Config)
 		}
