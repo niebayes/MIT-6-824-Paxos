@@ -43,11 +43,6 @@ func (kv *ShardKV) propose(op *Op) {
 		kv.mu.Lock()
 		kv.decidedOps[seqNum] = decidedOp
 
-		// update server state.
-		if opId, exist := kv.maxPropOpIdOfClerk[decidedOp.ClerkId]; !exist || opId < decidedOp.OpId {
-			kv.maxPropOpIdOfClerk[decidedOp.ClerkId] = decidedOp.OpId
-		}
-
 		// notify the executor thread.
 		kv.hasNewDecidedOp.Signal()
 
@@ -94,16 +89,20 @@ func (kv *ShardKV) waitUntilDecided(seqNum int) interface{} {
 	return Op{OpType: "NoOp"}
 }
 
-func (kv *ShardKV) waitUntilAppliedOrTimeout(op *Op) bool {
+func (kv *ShardKV) waitUntilAppliedOrTimeout(op *Op) (bool, string) {
+	var value string = ""
 	startTime := time.Now()
 	for time.Since(startTime) < maxWaitTime {
 		kv.mu.Lock()
-		if opId, exist := kv.maxApplyOpIdOfClerk[op.ClerkId]; exist && opId >= op.OpId {
+		if maxApplyOpId, exist := kv.maxApplyOpIdOfClerk[op.ClerkId]; exist && maxApplyOpId >= op.OpId {
+			if op.OpType == "Get" {
+				value = kv.shardDBs[key2shard(op.Key)].dB[op.Key]
+			}
 			kv.mu.Unlock()
-			return true
+			return true, value
 		}
 		kv.mu.Unlock()
 		time.Sleep(100 * time.Millisecond)
 	}
-	return false
+	return false, value
 }

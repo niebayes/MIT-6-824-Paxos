@@ -15,7 +15,7 @@ import "math/rand"
 import "6.824/src/shardmaster"
 
 const backoffFactor = 2
-const maxWaitTime = 500 * time.Millisecond
+const maxWaitTime = 1000 * time.Millisecond
 const initSleepTime = 10 * time.Millisecond
 const maxSleepTime = 500 * time.Millisecond
 const handoffShardsInterval = 200 * time.Millisecond
@@ -82,9 +82,6 @@ type ShardKV struct {
 	nextAllocSeqNum int
 	// the sequence number of the next op to execute.
 	nextExecSeqNum int
-	// the maximum op id among all the ops proposed for each clerk.
-	// any op with op id less than the max id is regarded as a dup op.
-	maxPropOpIdOfClerk map[int64]int
 	// the maximum op id among all the applied ops of each clerk.
 	// any op with op id less than the max id won't be applied.
 	maxApplyOpIdOfClerk map[int64]int
@@ -116,61 +113,31 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) error {
 	// wrap the request into an op.
 	op := &Op{ClerkId: args.ClerkId, OpId: args.OpId, OpType: "Get", Key: args.Key}
 
-	// check if this is a dup request.
-	isDup := false
-	if opId, exist := kv.maxPropOpIdOfClerk[op.ClerkId]; exist && opId >= op.OpId {
-		isDup = true
-		println("S%v-%v knows Get (C=%v Id=%v) is dup", kv.gid, kv.me, op.ClerkId, op.OpId)
+	// propose the op if it has not been applied yet.
+	if maxApplyOpId, exist := kv.maxApplyOpIdOfClerk[op.ClerkId]; !exist || maxApplyOpId < op.OpId {
+		go kv.propose(op)
 	}
 
-	if isDup {
-		kv.mu.Unlock()
-		if kv.waitUntilAppliedOrTimeout(op) {
-			// simply return OK whatsoever since the clerk is able to differentiate between OK and ErrNoKey from the value.
-			reply.Err = OK
-			kv.mu.Lock()
-			reply.Value = kv.shardDBs[key2shard(op.Key)].dB[op.Key]
-			kv.mu.Unlock()
-
-			println("S%v-%v replies Get (C=%v Id=%v)", kv.gid, kv.me, op.ClerkId, op.OpId)
-
-		} else {
-			// it's not necessary to differentiate between ErrNotExecuted and ErrWrongGroup here.
-			// if the op is not executed because the server is not serving the shard the time the server is
-			// executing the op, the client may resend the same request to the server because the reply is
-			// ErrNotExecuted.
-			// however, this time, the request would be rejected since the server is not serving the shard
-			// and ErrWrongGroup is replied.
-			// the client would then query the latest config from the shardmaster and send the request to
-			// another replica group.
-			//
-			// note, the same reasoning applies to all places where ErrNotExecuted is returned.
-			reply.Err = ErrNotExecuted
-		}
-		return nil
-	}
-	// not a dup request.
-
-	// update the max proposed op id the server has ever seen to support
-	// dup checking and filtering.
-	if opId, exist := kv.maxPropOpIdOfClerk[op.ClerkId]; !exist || opId < op.OpId {
-		kv.maxPropOpIdOfClerk[op.ClerkId] = op.OpId
-	}
 	kv.mu.Unlock()
 
-	// start proposing the op.
-	go kv.propose(op)
-
 	// wait until the op is executed or timeout.
-	if kv.waitUntilAppliedOrTimeout(op) {
+	if applied, value := kv.waitUntilAppliedOrTimeout(op); applied {
 		reply.Err = OK
-		kv.mu.Lock()
-		reply.Value = kv.shardDBs[key2shard(op.Key)].dB[op.Key]
-		kv.mu.Unlock()
+		reply.Value = value
 
 		println("S%v-%v replies Get (C=%v Id=%v)", kv.gid, kv.me, op.ClerkId, op.OpId)
 
 	} else {
+		// it's not necessary to differentiate between ErrNotExecuted and ErrWrongGroup here.
+		// if the op is not executed because the server is not serving the shard the time the server is
+		// executing the op, the client may resend the same request to this server because the reply is
+		// ErrNotExecuted.
+		// however, this time, the request would be rejected since the server is not serving the shard
+		// and ErrWrongGroup is replied.
+		// the client would then query the latest config from the shardmaster and send the request to
+		// another replica group who is serving the shard.
+		//
+		// note, the same reasoning applies to all places where ErrNotExecuted is returned.
 		reply.Err = ErrNotExecuted
 	}
 
@@ -193,38 +160,15 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error {
 	// wrap the request into an op.
 	op := &Op{ClerkId: args.ClerkId, OpId: args.OpId, OpType: args.OpType, Key: args.Key, Value: args.Value}
 
-	// check if this is a dup request.
-	isDup := false
-	if opId, exist := kv.maxPropOpIdOfClerk[op.ClerkId]; exist && opId >= op.OpId {
-		println("S%v-%v knows PutAppend (C=%v Id=%v) is dup", kv.gid, kv.me, op.ClerkId, op.OpId)
-		isDup = true
+	// propose the op if it has not been applied yet.
+	if maxApplyOpId, exist := kv.maxApplyOpIdOfClerk[op.ClerkId]; !exist || maxApplyOpId < op.OpId {
+		go kv.propose(op)
 	}
 
-	if isDup {
-		kv.mu.Unlock()
-		if kv.waitUntilAppliedOrTimeout(op) {
-			reply.Err = OK
-			println("S%v-%v knows PutAppend (C=%v Id=%v) was applied", kv.gid, kv.me, op.ClerkId, op.OpId)
-
-		} else {
-			reply.Err = ErrNotExecuted
-		}
-		return nil
-	}
-	// not a dup request.
-
-	// update the max proposed op id the server has ever seen to support
-	// dup checking and filtering.
-	if opId, exist := kv.maxPropOpIdOfClerk[op.ClerkId]; !exist || opId < op.OpId {
-		kv.maxPropOpIdOfClerk[op.ClerkId] = op.OpId
-	}
 	kv.mu.Unlock()
 
-	// start proposing the op.
-	go kv.propose(op)
-
 	// wait until the op is executed or timeout.
-	if kv.waitUntilAppliedOrTimeout(op) {
+	if applied, _ := kv.waitUntilAppliedOrTimeout(op); applied {
 		reply.Err = OK
 		println("S%v-%v knows PutAppend (C=%v Id=%v) was applied", kv.gid, kv.me, op.ClerkId, op.OpId)
 
@@ -268,8 +212,6 @@ func (kv *ShardKV) executor() {
 				// allocate a large-enough seq num to let the op get decided.
 				kv.nextAllocSeqNum = kv.nextExecSeqNum
 			}
-
-			// println("S%v-%v state (ASN=%v ESN=%v CN=%v C=%v PId=%v AId=%v)", kv.gid, kv.me, kv.nextAllocSeqNum, kv.nextExecSeqNum, kv.config.Num, op.ClerkId, kv.maxPropOpIdOfClerk[op.ClerkId], kv.maxApplyOpIdOfClerk[op.ClerkId])
 
 		} else {
 			kv.hasNewDecidedOp.Wait()
@@ -413,7 +355,6 @@ func StartServer(gid int64, shardmasters []string,
 
 	kv.nextAllocSeqNum = 0
 	kv.nextExecSeqNum = 0
-	kv.maxPropOpIdOfClerk = make(map[int64]int)
 	kv.maxApplyOpIdOfClerk = make(map[int64]int)
 	kv.decidedOps = make(map[int]Op)
 	kv.hasNewDecidedOp = *sync.NewCond(&kv.mu)
