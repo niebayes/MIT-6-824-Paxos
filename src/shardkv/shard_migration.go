@@ -205,18 +205,37 @@ func (kv *ShardKV) installShard(op *Op) {
 	// which may incur a tricky bug that an update in one server of the group will also
 	// be reflected in another server of the same group.
 	// this is because the tests run a mocking cluster wherein all servers run in the same local machine.
+
+	println("old db SN=%v:", op.Shard)
+	for k, v := range kv.shardDBs[op.Shard].dB {
+		println("S%v-%v K=%v V=%v", kv.gid, kv.me, k, v)
+	}
+
 	for k, v := range op.DB {
 		kv.shardDBs[op.Shard].dB[k] = v
+	}
+
+	println("new db:")
+	for k, v := range kv.shardDBs[op.Shard].dB {
+		println("S%v-%v K=%v V=%v", kv.gid, kv.me, k, v)
 	}
 	kv.shardDBs[op.Shard].state = Serving
 
 	// update clerk state.
 	// this update could also be performed by replacing.
 	// the above reasoning applies on here as well since not only shard data is synced, the max apply op id is also synced.
+	println("old max apply SN=%v:", op.Shard)
+	for k, v := range kv.maxApplyOpIdOfClerk {
+		println("S%v-%v C=%v AId=%v", kv.gid, kv.me, k, v)
+	}
 	for clerkId, otherOpId := range op.MaxApplyOpIdOfClerk {
 		if opId, exist := kv.maxApplyOpIdOfClerk[clerkId]; !exist || otherOpId > opId {
 			kv.maxApplyOpIdOfClerk[clerkId] = otherOpId
 		}
+	}
+	println("new max apply SN=%v:", op.Shard)
+	for k, v := range kv.maxApplyOpIdOfClerk {
+		println("S%v-%v C=%v AId=%v", kv.gid, kv.me, k, v)
 	}
 
 	println("S%v-%v starts serving shard (SN=%v)", kv.gid, kv.me, op.Shard)

@@ -162,6 +162,13 @@ func (kv *ShardKV) maybeApplyClientOp(op *Op) {
 		kv.maxApplyOpIdOfClerk[op.ClerkId] = op.OpId
 
 		println("S%v-%v applied client op (C=%v Id=%v) at N=%v", kv.gid, kv.me, op.ClerkId, op.OpId, kv.nextExecSeqNum)
+	} else {
+		if kv.isApplied(op) {
+			println("S%v-%v discards client op due to already applied (C=%v Id=%v) at N=%v", kv.gid, kv.me, op.ClerkId, op.OpId, kv.nextExecSeqNum)
+		}
+		if !kv.isServingKey(op.Key) {
+			println("S%v-%v discards client op due to not serving (C=%v Id=%v) at N=%v", kv.gid, kv.me, op.ClerkId, op.OpId, kv.nextExecSeqNum)
+		}
 	}
 }
 
@@ -179,6 +186,7 @@ func (kv *ShardKV) applyClientOp(op *Op) {
 
 	case "Append":
 		// note: the default value is returned if the key does not exist.
+		println("S%v-%v appens %v to %v", kv.gid, kv.me, op.Value, db[op.Key])
 		db[op.Key] += op.Value
 
 	default:
