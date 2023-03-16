@@ -38,6 +38,7 @@ func (kv *ShardKV) tick() {
 
 func (kv *ShardKV) installConfig(nextConfig shardmaster.Config) {
 	// check if there's any change on the served shards.
+	// TODO: change back to hasShardsToxxx.
 	shardsToHandoff := make([]int, 0)
 	shardsToTakeOver := make([]int, 0)
 

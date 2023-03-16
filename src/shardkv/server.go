@@ -22,9 +22,6 @@ const handoffShardsInterval = 200 * time.Millisecond
 const checkMigrationStateInterval = 200 * time.Millisecond
 const proposeNoOpInterval = 250 * time.Millisecond
 
-// TODO：尝试将 polling waiting to apply 改为 channel。当时是因为啥原因来着，一开始用了 channel，后来好像 close channel 不太懂，就没用了。
-// TODO: add doc for how i solve the two challenges in the 6.824 lab4.
-
 // the normal execution phase of an op consists of:
 // receive request, propose op, decide op, execute op, apply op.
 type Op struct {
@@ -41,10 +38,10 @@ type Op struct {
 
 type ShardState int
 
-// warning: be careful when using int enums. Remember to init to a reasonable value.
+// warning: remember to place the default value of the enum at the beginning so that the init value is the desired one.
 const (
-	Serving    ShardState = iota // the server is serving the shard.
-	NotServing                   // the server is not serving the shard.
+	NotServing ShardState = iota // the server is not serving the shard.
+	Serving                      // the server is serving the shard.
 	MovingIn                     // the server is waiting for the shard data to be moved in.
 	MovingOut                    // the server is moving out the shard data.
 )
