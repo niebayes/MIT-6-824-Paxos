@@ -147,8 +147,6 @@ func (kv *ShardKV) maybeApplyAdminOp(op *Op) {
 
 		if kv.reconfigureToConfigNum == op.ConfigNum && kv.shardDBs[op.Shard].state == MovingIn {
 			kv.installShard(op)
-
-			println("S%v-%v applied InstallShard op (CN=%v, SN=%v) at N=%v", kv.gid, kv.me, op.Config.Num, op.Shard, kv.nextExecSeqNum)
 		}
 
 	default:

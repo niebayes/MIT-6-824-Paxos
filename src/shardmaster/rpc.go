@@ -47,15 +47,15 @@ func (cfg *Config) clonedWithIncNum() Config {
 type Err string
 
 const (
-	OK             = "OK"
-	ErrNotExecuted = "ErrNotExecuted"
+	OK            = "OK"
+	ErrNotApplied = "ErrNotApplied"
 )
 
 type JoinArgs struct {
-	GID     int64    // unique replica group ID
-	Servers []string // group server ports
 	ClerkId int64
 	OpId    int
+	GID     int64    // unique replica group ID
+	Servers []string // group server ports
 }
 
 type JoinReply struct {
@@ -63,9 +63,9 @@ type JoinReply struct {
 }
 
 type LeaveArgs struct {
-	GID     int64
 	ClerkId int64
 	OpId    int
+	GID     int64
 }
 
 type LeaveReply struct {
@@ -73,10 +73,10 @@ type LeaveReply struct {
 }
 
 type MoveArgs struct {
-	Shard   int // shard id.
-	GID     int64
 	ClerkId int64
 	OpId    int
+	Shard   int // shard id.
+	GID     int64
 }
 
 type MoveReply struct {
@@ -84,21 +84,14 @@ type MoveReply struct {
 }
 
 type QueryArgs struct {
-	Num     int // config number.
 	ClerkId int64
 	OpId    int
+	Num     int // config number.
 }
 
 type QueryReply struct {
 	Config Config
 	Err    Err
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 func min(a, b int) int {

@@ -15,14 +15,6 @@ func (sm *ShardMaster) allocateSeqNum() int {
 	return seqNum
 }
 
-func isSameOp(opX *Op, opY *Op) bool {
-	// comparing op types is used to compare two no-ops.
-	// comparing clerk id and op id is used to compare two client ops.
-	// it's okay the opX and opY that literally are not the same ops as long as they have the same
-	// effect when they're executed.
-	return opX.OpType == opY.OpType && opX.ClerkId == opY.ClerkId && opX.OpId == opY.OpId
-}
-
 func (sm *ShardMaster) propose(op *Op) {
 	for !sm.isdead() {
 		// choose a sequence number for the op.
@@ -39,11 +31,6 @@ func (sm *ShardMaster) propose(op *Op) {
 		// store the decided op.
 		sm.mu.Lock()
 		sm.decidedOps[seqNum] = decidedOp
-
-		// update server state.
-		if opId, exist := sm.maxPropOpIdOfClerk[decidedOp.ClerkId]; !exist || opId < decidedOp.OpId {
-			sm.maxPropOpIdOfClerk[decidedOp.ClerkId] = decidedOp.OpId
-		}
 
 		// notify the executor thread.
 		sm.hasNewDecidedOp.Signal()
@@ -89,19 +76,4 @@ func (sm *ShardMaster) waitUntilDecided(seqNum int) interface{} {
 	// is returned from `waitUntilDecided`.
 	// to workaround such an issue, we choose to return a no-op instead of a nil.
 	return Op{OpType: "NoOp"}
-}
-
-// return true if the op is executed before timeout.
-func (sm *ShardMaster) waitUntilAppliedOrTimeout(op *Op) bool {
-	startTime := time.Now()
-	for time.Since(startTime) < maxWaitTime {
-		sm.mu.Lock()
-		if opId, exist := sm.maxApplyOpIdOfClerk[op.ClerkId]; exist && opId >= op.OpId {
-			sm.mu.Unlock()
-			return true
-		}
-		sm.mu.Unlock()
-		time.Sleep(100 * time.Millisecond)
-	}
-	return false
 }
