@@ -8,10 +8,9 @@ package shardkv
 //
 
 const (
-	OK             = "OK"
-	ErrWrongGroup  = "ErrWrongGroup"
-	ErrNotExecuted = "ErrNotExecuted"
-	ErrNotProposed = "ErrNotProposed" // used in shard migration.
+	OK            = "OK"
+	ErrWrongGroup = "ErrWrongGroup"
+	ErrNotApplied = "ErrNotApplied"
 )
 
 type Err string

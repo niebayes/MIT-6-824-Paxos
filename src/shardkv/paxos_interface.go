@@ -16,19 +16,9 @@ func (kv *ShardKV) allocateSeqNum() int {
 	return seqNum
 }
 
-func isSameOp(opX *Op, opY *Op) bool {
-	// comparing op types is used to compare two no-ops.
-	// comparing clerk id and op id is used to compare two client ops.
-	// comparing config num is used to compare two install config ops.
-	// comparing shard num is used to compare two install shard ops.
-	// it's okay the opX and opY that literally are not the same ops as long as they have the same
-	// effect when they're executed.
-	return opX.OpType == opY.OpType && opX.ClerkId == opY.ClerkId && opX.OpId == opY.OpId && opX.Config.Num == opY.Config.Num && opX.Shard == opY.Shard
-}
-
 func (kv *ShardKV) propose(op *Op) {
 	for !kv.isdead() {
-		// choose a sequence number for the op.
+		// allocate a sequence number for the op.
 		seqNum := kv.allocateSeqNum()
 
 		// starts proposing the op at this sequence number.
@@ -53,13 +43,13 @@ func (kv *ShardKV) propose(op *Op) {
 			kv.mu.Unlock()
 			return
 		}
-		// another op is chosen as the decided value at sequence number seqNum.
+		// otherwise, it's another op chosen as the decided value at the sequence number seqNum.
 		// retry proposing the op at a different sequence number.
 		kv.mu.Unlock()
 	}
 }
 
-// wait until the paxos instance with sequence number seqNum decided.
+// wait until the paxos instance with the sequence number seqNum decided.
 // return the decided value when decided.
 func (kv *ShardKV) waitUntilDecided(seqNum int) interface{} {
 	lastSleepTime := initSleepTime
@@ -69,10 +59,12 @@ func (kv *ShardKV) waitUntilDecided(seqNum int) interface{} {
 			// if forgotten, decidedValue will be nil.
 			// but this shall not happen since this value is forgotten only after
 			// this server has called Done on this value.
+			// hence, the returned decidedValue shall not be nil.
 			return decidedValue
 		}
 
 		// wait a while and retry.
+		// this backoff sleeping scheme is not necessary.
 		sleepTime := lastSleepTime * backoffFactor
 		if sleepTime > maxSleepTime {
 			sleepTime = maxSleepTime
@@ -87,22 +79,4 @@ func (kv *ShardKV) waitUntilDecided(seqNum int) interface{} {
 	// is returned from `waitUntilDecided`.
 	// to workaround such an issue, we choose to return a no-op instead of a nil.
 	return Op{OpType: "NoOp"}
-}
-
-func (kv *ShardKV) waitUntilAppliedOrTimeout(op *Op) (bool, string) {
-	var value string = ""
-	startTime := time.Now()
-	for time.Since(startTime) < maxWaitTime {
-		kv.mu.Lock()
-		if maxApplyOpId, exist := kv.maxApplyOpIdOfClerk[op.ClerkId]; exist && maxApplyOpId >= op.OpId {
-			if op.OpType == "Get" {
-				value = kv.shardDBs[key2shard(op.Key)].dB[op.Key]
-			}
-			kv.mu.Unlock()
-			return true, value
-		}
-		kv.mu.Unlock()
-		time.Sleep(100 * time.Millisecond)
-	}
-	return false, value
 }

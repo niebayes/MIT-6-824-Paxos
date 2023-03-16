@@ -5,15 +5,11 @@ import "6.824/src/shardmaster"
 
 type InstallShardArgs struct {
 	// the receiver would reject the shard if it's not in the same config.
-	// if the receiver is allowed to propose an install shard op before it's reconfiguring to
-	// the corresponding config, then the install shard would be applied prior to the start of
-	// the reconfiguring which is definitely incorrect.
-	ConfigNum int               // sender's config number.
-	Shard     int               // shard id.
-	DB        map[string]string // shard data.
-	// to support the at-most-once semantics, max apply op id is necessary to be synced
-	// while the max prop op id is not.
-	MaxApplyOpIdOfClerk map[int64]int
+	// see the reasoning in `InstallShard`.
+	ConfigNum           int               // sender's current config number.
+	Shard               int               // shard id.
+	DB                  map[string]string // shard data.
+	MaxApplyOpIdOfClerk map[int64]int     // necessary for implementing the at-most-once semantics.
 }
 
 type InstallShardReply struct {
@@ -31,6 +27,7 @@ func (kv *ShardKV) makeInstallShardArgs(shard int) InstallShardArgs {
 	}
 
 	// deep clone shard data.
+	// deep clone is necessary. See the bug described in `installShard`.
 	for k, v := range shardDB.dB {
 		args.DB[k] = v
 	}
@@ -48,11 +45,17 @@ func (kv *ShardKV) handoffShards(configNum int) {
 		kv.mu.Lock()
 
 		// each reconfiguring will incur a `handoffShards` if there're shards required to move out.
-		// put another way, the `handoffShards` is associated with this reconfiguring.
+		// put another way, this `handoffShards` is associated with a reconfiguring.
 		// therefore, this `handoffShards` keeps running only if the server is reconfiguring
 		// to the config with the config number configNum.
-		// simply checking `reconfiguring` is not safe due to concurrency.
-		if kv.config.Num != configNum || !kv.reconfiguring {
+		//
+		// note: it's okay we simply check `reconfiguring`.
+		// assume a reconfiguring starts just follow the complete of the last reconfugring.
+		// so that the `handoffShards` would not exit since `reconfiguring` is set to true
+		// by the current reconfiguring.
+		// although this is okay, we choose to associate each `handoffShards` to a reconfiguring
+		// and kill it once the corresponding reconfiguring is done.
+		if kv.config.Num != configNum || kv.reconfigureToConfigNum != configNum {
 			kv.mu.Unlock()
 			break
 		}
@@ -91,21 +94,14 @@ func (kv *ShardKV) checkMigrationState(configNum int) {
 	for !kv.isdead() {
 		kv.mu.Lock()
 
-		if kv.config.Num != configNum || !kv.reconfiguring {
+		// see the reasoning in `handoffShards`.
+		if kv.config.Num != configNum || kv.reconfigureToConfigNum != configNum {
 			kv.mu.Unlock()
 			break
 		}
 
-		migrating := false
-		for shard := 0; shard < shardmaster.NShards; shard++ {
-			if kv.shardDBs[shard].state == MovingIn || kv.shardDBs[shard].state == MovingOut {
-				migrating = true
-				break
-			}
-		}
-
-		if !migrating {
-			kv.reconfiguring = false
+		if !kv.isMigrating() {
+			kv.reconfigureToConfigNum = -1
 			println("S%v-%v reconfigure done (CN=%v)", kv.gid, kv.me, kv.config.Num)
 			kv.mu.Unlock()
 			break
@@ -127,8 +123,9 @@ func (kv *ShardKV) sendShard(args *InstallShardArgs, gid int64) {
 		// otherwise, we retry sending the shard to other servers in the receiver replica group.
 		if ok && reply.Err == OK {
 			kv.mu.Lock()
-			// if no server crash, once an op is proposed, paxos guarantees that the op would be decided.
-			// hence, the proposed install shard op would sooner or later be executed by the receiver,
+			// if there's no server crash, once an op is givens to a proposer thread, the proposer thread guarantees
+			// it would be proposed to paxos and paxos guarantees that the op would be decided.
+			// hence, the install shard op would sooner or later be executed by the receiver,
 			// and hence the sender can safely set the shard state to NotServing.
 			//
 			// note, there's no need to propose a reconfigure done op to sync the complete of moving out shards.
@@ -137,7 +134,7 @@ func (kv *ShardKV) sendShard(args *InstallShardArgs, gid int64) {
 			// each server in the replica group will try to send the shard to the receiver replica group.
 			// the receiver would reply OK upon receiving a message if the receiver has proposed an install shard op for the shard.
 			// hence, all servers in the sender replica group will sooner or later learns the complete of the shard migration
-			// and no live lock would be introduced.
+			// and starts not serving the moved-out shards.
 			//
 			// note: if used the pull-based migration, the logic in the sender side would be more complicated.
 			kv.shardDBs[args.Shard].state = NotServing
@@ -156,8 +153,15 @@ func (kv *ShardKV) InstallShard(args *InstallShardArgs, reply *InstallShardReply
 	defer kv.mu.Unlock()
 
 	// reject the shard since the receiver and the sender are not in the same config.
+	// for example, the group serves a shard in the last config and moves the shard out in the current config.
+	// it then serves the shard in the next config.
+	// due to network delay and other issues, the install shard request corresponding to the last config
+	// happens to arrive at the next config.
+	// if we do not reject the request, the stale shard data may get installed.
+	// although we could delay the staleness checking to the time the op gets executed,
+	// it'd be better to filter out such requests upon receiving the requests.
 	if args.ConfigNum != kv.config.Num {
-		reply.Err = ErrNotProposed
+		reply.Err = ErrNotApplied
 		println("S%v-%v rejects InstallShard due to inconsistent config (CN=%v ACN=%v SN=%v)", kv.gid, kv.me, kv.config.Num, args.ConfigNum, args.Shard)
 		return nil
 	}
@@ -172,46 +176,57 @@ func (kv *ShardKV) InstallShard(args *InstallShardArgs, reply *InstallShardReply
 	println("S%v-%v accepts InstallShard (ACN=%v SN=%v)", kv.gid, kv.me, args.ConfigNum, args.Shard)
 
 	// note, there's a gap between the proposing of the op and the execution of the op.
-	// we could filter the dup op in order to reject the shard during the gap.
-	// however, this would complicate the implementation and is not necessary.
+	// we could filter the dup op so that the bandwidth pressure on the paxos level could be reduced.
+	// however, this would require us to assign a unique server id and op id for each admin op.
+	// hence, we choose not to filter out dup admin ops but restricted to apply it at most once.
 
 	// propose an install shard op.
-	op := &Op{OpType: "InstallShard", Shard: args.Shard, DB: args.DB, MaxApplyOpIdOfClerk: args.MaxApplyOpIdOfClerk}
+	op := &Op{OpType: "InstallShard", ConfigNum: args.ConfigNum, Shard: args.Shard, DB: args.DB, MaxApplyOpIdOfClerk: args.MaxApplyOpIdOfClerk}
 	go kv.propose(op)
 
 	// reply OK so that the sender knows an install shard op is proposed.
+	// warning: immediately replying OK is okay only if there's no server crash.
+	// if the server may crash, the proposer thread is killed and the install shard op is lost.
+	// however, the sender would not re-send the shard data since OK is replied.
+	// if there's server crash, the correct way is to let the receiver replies OK only if the
+	// install shard op is applied.
 	reply.Err = OK
 
 	return nil
 }
 
-// FIXME: 找到目前的问题了：一是由于没有正确 handle dup checking and dup filtering，而是没有保证 at-most-once semantics.
-// 着重考虑 max prop op id 和 max apply op id 在 concurrent install config and shard 和 discard request and discard reply
-// 时的情况。
 func (kv *ShardKV) installShard(op *Op) {
 	// install server state.
-	println("S%v-%v old db:\n", kv.gid, kv.me)
-	for k, v := range kv.shardDBs[op.Shard].dB {
-		println("K=%v V=%v", k, v)
+	// the installation could be performed either by replacing or updating.
+	// all shard data is migrated during shard migration, so replacing is okay.
+	// undeleted stale shard data will be shadowed, so updating is okay as well.
+	//
+	// warning: simply assign op.DB to kv.DB is incorrect since variables in Go are references
+	// which may incur a tricky bug that an update in one server of the group will also
+	// be reflected in another server of the same group.
+	// this is because the tests run a mocking cluster wherein all servers run in the same local machine.
+	for k, v := range op.DB {
+		kv.shardDBs[op.Shard].dB[k] = v
 	}
-
-	// FIXME: install by replacing or updating?
-	kv.shardDBs[op.Shard].dB = op.DB
 	kv.shardDBs[op.Shard].state = Serving
 
-	println("S%v-%v new db:\n", kv.gid, kv.me)
-	for k, v := range kv.shardDBs[op.Shard].dB {
-		println("K=%v V=%v", k, v)
-	}
-
 	// update clerk state.
+	// this update could also be performed by replacing.
+	// the above reasoning applies on here as well since not only shard data is synced, the max apply op id is also synced.
 	for clerkId, otherOpId := range op.MaxApplyOpIdOfClerk {
 		if opId, exist := kv.maxApplyOpIdOfClerk[clerkId]; !exist || otherOpId > opId {
 			kv.maxApplyOpIdOfClerk[clerkId] = otherOpId
 		}
 	}
 
-	// TODO: add op to notify servers in one group to start serve / not serve a shard. (This is not necessary).
-
 	println("S%v-%v starts serving shard (SN=%v)", kv.gid, kv.me, op.Shard)
+}
+
+func (kv *ShardKV) isMigrating() bool {
+	for shard := 0; shard < shardmaster.NShards; shard++ {
+		if kv.shardDBs[shard].state == MovingIn || kv.shardDBs[shard].state == MovingOut {
+			return true
+		}
+	}
+	return false
 }

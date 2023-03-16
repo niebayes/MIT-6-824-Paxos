@@ -3,16 +3,14 @@ package shardkv
 import "6.824/src/shardmaster"
 import "net/rpc"
 import "time"
-import "sync"
 import "fmt"
 import "crypto/rand"
 import "math/big"
 
 type Clerk struct {
-	mu       sync.Mutex
-	sm       *shardmaster.Clerk // used to contact with the shardmaster.
-	config   shardmaster.Config // current config.
-	clerkId  int64              // the id of this clerk.
+	sm       *shardmaster.Clerk // used to contact with the shardmaster service.
+	config   shardmaster.Config // clerk's current config.
+	clerkId  int64              // the unique id of this clerk.
 	nextOpId int                // the next op id to allocate.
 }
 
@@ -22,7 +20,6 @@ func MakeClerk(shardmasters []string) *Clerk {
 	ck.config = shardmaster.Config{Num: 0, Groups: make(map[int64][]string)}
 	ck.clerkId = nrand()
 	ck.nextOpId = 0
-	ck.mu = sync.Mutex{}
 	return ck
 }
 
@@ -53,10 +50,6 @@ func key2shard(key string) int {
 // returns "" if the key does not exist.
 // keeps trying forever in the face of all other errors.
 func (ck *Clerk) Get(key string) string {
-	// FIXME: check the test codes to see if it's necessary to add concurrency control at the clerk side?
-	ck.mu.Lock()
-	defer ck.mu.Unlock()
-
 	args := &GetArgs{ClerkId: ck.clerkId, OpId: ck.allocateOpId(), Key: key}
 
 	for {
@@ -82,19 +75,13 @@ func (ck *Clerk) Get(key string) string {
 
 		time.Sleep(100 * time.Millisecond)
 
-		// ask master for a new configuration.
+		// ask the shardmaster for the latest configuration.
 		ck.config = ck.sm.Query(-1)
-
-		// println("C%v uses config (CN=%v)", ck.clerkId, ck.config.Num)
-		// shardmaster.PrintGidToShards(&ck.config, DEBUG)
 	}
 }
 
 // send a Put or Append request.
 func (ck *Clerk) PutAppend(key string, value string, op string) {
-	ck.mu.Lock()
-	defer ck.mu.Unlock()
-
 	args := &PutAppendArgs{ClerkId: ck.clerkId, OpId: ck.allocateOpId(), OpType: op, Key: key, Value: value}
 
 	for {
@@ -120,11 +107,8 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 
 		time.Sleep(100 * time.Millisecond)
 
-		// ask master for a new configuration.
+		// ask the shardmaster for the latest configuration.
 		ck.config = ck.sm.Query(-1)
-
-		// println("C%v uses config (CN=%v)", ck.clerkId, ck.config.Num)
-		// shardmaster.PrintGidToShards(&ck.config, DEBUG)
 	}
 }
 

@@ -22,23 +22,9 @@ const handoffShardsInterval = 200 * time.Millisecond
 const checkMigrationStateInterval = 200 * time.Millisecond
 const proposeNoOpInterval = 250 * time.Millisecond
 
-// the normal execution phase of an op consists of:
-// receive request, propose op, decide op, execute op, apply op.
-type Op struct {
-	ClerkId             int64
-	OpId                int
-	OpType              string // "Get", "Put", "Append", "InstallConfig", "InstallShard", "NoOp".
-	Key                 string
-	Value               string
-	Config              shardmaster.Config // the config to be installed.
-	Shard               int                // install shard op will install the shard data DB on the shard Shard.
-	DB                  map[string]string
-	MaxApplyOpIdOfClerk map[int64]int // the clerk state would also be installed upon the installation of the shard data.
-}
-
 type ShardState int
 
-// warning: remember to place the default value of the enum at the beginning so that the init value is the desired one.
+// warning: remember to place the desired default value of the enum at the beginning so that the init value is the desired default value.
 const (
 	NotServing ShardState = iota // the server is not serving the shard.
 	Serving                      // the server is serving the shard.
@@ -47,7 +33,7 @@ const (
 )
 
 type ShardDB struct {
-	dB    map[string]string
+	dB    map[string]string // shard data, a key-value store.
 	state ShardState
 	// if used push-based migration, toGid is used.
 	// if used pull-based migration, fromGid is used.
@@ -67,14 +53,14 @@ type ShardKV struct {
 	// the group id of the replica group this server is in.
 	gid int64
 	// all shards of the database.
-	// since the sharding is static, it's convenient to store shards in a fixed-size array.
+	// since the sharding is static, i.e. no shard splitting and coalescing,
+	// it's convenient to store shards in a fixed-size array.
 	shardDBs [shardmaster.NShards]ShardDB
-	// current config.
+	// server's current config.
 	config shardmaster.Config
-	// true if the server is reconfiguring.
-	// the reconfiguring is set to true from the beginning of proposing a config change op
-	// to the complete of shard migration.
-	reconfiguring bool
+	// the config num of the config the server is reconfiguring to.
+	// set to -1 if the server is not reconfiguring.
+	reconfigureToConfigNum int
 
 	// in order to interact with paxos, the following fields must be used.
 
@@ -82,13 +68,13 @@ type ShardKV struct {
 	nextAllocSeqNum int
 	// the sequence number of the next op to execute.
 	nextExecSeqNum int
-	// the maximum op id among all the applied ops of each clerk.
-	// any op with op id less than the max id won't be applied.
+	// the maximum op id among all applied ops of each clerk.
+	// any op with op id less than the max id won't be applied, so that the at-most-once semantics is guaranteed.
 	maxApplyOpIdOfClerk map[int64]int
 	// all decided ops this server knows of.
 	// key: sequence number, value: the decided op.
 	decidedOps map[int]Op
-	// to notify the executor that there's a new decided op.
+	// through which a proposer notifies the executor that there's a new decided op.
 	hasNewDecidedOp sync.Cond
 }
 
@@ -101,6 +87,8 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) error {
 	// given key, there has little chance that this server will serve
 	// the given key the time the op constructed from the request is being
 	// executed.
+	// it's okay if we do not reject the request so long as we guarantee that
+	// an op is applied only if it's not applied before.
 	if !kv.isServingKey(args.Key) {
 		kv.mu.Unlock()
 		reply.Err = ErrWrongGroup
@@ -113,14 +101,11 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) error {
 	// wrap the request into an op.
 	op := &Op{ClerkId: args.ClerkId, OpId: args.OpId, OpType: "Get", Key: args.Key}
 
-	// propose the op if it has not been applied yet.
-	if maxApplyOpId, exist := kv.maxApplyOpIdOfClerk[op.ClerkId]; !exist || maxApplyOpId < op.OpId {
+	if !kv.isApplied(op) {
 		go kv.propose(op)
 	}
-
 	kv.mu.Unlock()
 
-	// wait until the op is executed or timeout.
 	if applied, value := kv.waitUntilAppliedOrTimeout(op); applied {
 		reply.Err = OK
 		reply.Value = value
@@ -128,17 +113,17 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) error {
 		println("S%v-%v replies Get (C=%v Id=%v)", kv.gid, kv.me, op.ClerkId, op.OpId)
 
 	} else {
-		// it's not necessary to differentiate between ErrNotExecuted and ErrWrongGroup here.
+		// it's not necessary to differentiate between ErrNotApplied and ErrWrongGroup here.
 		// if the op is not executed because the server is not serving the shard the time the server is
 		// executing the op, the client may resend the same request to this server because the reply is
-		// ErrNotExecuted.
+		// ErrNotApplied.
 		// however, this time, the request would be rejected since the server is not serving the shard
 		// and ErrWrongGroup is replied.
 		// the client would then query the latest config from the shardmaster and send the request to
 		// another replica group who is serving the shard.
 		//
-		// note, the same reasoning applies to all places where ErrNotExecuted is returned.
-		reply.Err = ErrNotExecuted
+		// note, the same reasoning applies to all places where ErrNotApplied is returned.
+		reply.Err = ErrNotApplied
 	}
 
 	return nil
@@ -148,6 +133,7 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error {
 	kv.mu.Lock()
 
 	// reply ErrWrongGroup if not serving the given key.
+	// see reasoning in `Get`.
 	if !kv.isServingKey(args.Key) {
 		kv.mu.Unlock()
 		reply.Err = ErrWrongGroup
@@ -160,147 +146,21 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error {
 	// wrap the request into an op.
 	op := &Op{ClerkId: args.ClerkId, OpId: args.OpId, OpType: args.OpType, Key: args.Key, Value: args.Value}
 
-	// propose the op if it has not been applied yet.
-	if maxApplyOpId, exist := kv.maxApplyOpIdOfClerk[op.ClerkId]; !exist || maxApplyOpId < op.OpId {
+	if !kv.isApplied(op) {
 		go kv.propose(op)
 	}
-
 	kv.mu.Unlock()
 
-	// wait until the op is executed or timeout.
 	if applied, _ := kv.waitUntilAppliedOrTimeout(op); applied {
 		reply.Err = OK
-		println("S%v-%v knows PutAppend (C=%v Id=%v) was applied", kv.gid, kv.me, op.ClerkId, op.OpId)
+		println("S%v-%v replies PutAppend (C=%v Id=%v)", kv.gid, kv.me, op.ClerkId, op.OpId)
 
 	} else {
-		reply.Err = ErrNotExecuted
+		// see reasoning in `Get`.
+		reply.Err = ErrNotApplied
 	}
 
 	return nil
-}
-
-func (kv *ShardKV) executor() {
-	kv.mu.Lock()
-	for !kv.isdead() {
-		op, decided := kv.decidedOps[kv.nextExecSeqNum]
-		if decided {
-			if kv.isNoOp(&op) {
-				// skip no-ops.
-
-			} else if kv.isAdminOp(&op) {
-				kv.maybeApplyAdminOp(&op)
-
-			} else {
-				kv.maybeApplyClientOp(&op)
-			}
-
-			// tell the paxos peer that this op is done and free server state.
-			// if an op is not applied this time, it will never get applied.
-			// however, a new op constructed from the same request is allowed to get applied in future.
-			// therefore, this delete is safe.
-			kv.px.Done(kv.nextExecSeqNum)
-			delete(kv.decidedOps, kv.nextExecSeqNum)
-
-			// update server state.
-			kv.nextExecSeqNum++
-			if kv.nextExecSeqNum > kv.nextAllocSeqNum {
-				// although each server executes the decided ops independently,
-				// a server may see ops proposed by other servers.
-				// if the server proposes an op with a stale seq num, than the op would never get
-				// decided.
-				// hence, we need to update the seq num so that the server has more chance to
-				// allocate a large-enough seq num to let the op get decided.
-				kv.nextAllocSeqNum = kv.nextExecSeqNum
-			}
-
-		} else {
-			kv.hasNewDecidedOp.Wait()
-		}
-	}
-	kv.mu.Unlock()
-}
-
-func (kv *ShardKV) isAdminOp(op *Op) bool {
-	return op.OpType == "InstallConfig" || op.OpType == "InstallShard"
-}
-
-func (kv *ShardKV) maybeApplyAdminOp(op *Op) {
-	switch op.OpType {
-	case "InstallConfig":
-		// install the config it's config num is one larger than the current config
-		// and the server is not reconfiguring.
-		// FIXME: seems it's not necessary to check if the server is reconfiguring.
-		if op.Config.Num == kv.config.Num+1 {
-			kv.reconfiguring = true
-			kv.installConfig(op.Config)
-		}
-
-	case "InstallShard":
-		// install the shard if it's not installed yet and the server is reconfiguring.
-		// FIXME: it's necessary to only install the shard if the shard config is the same as the server's current config?
-		if kv.reconfiguring && kv.shardDBs[op.Shard].state == MovingIn {
-			kv.installShard(op)
-
-			println("S%v-%v applied InstallShard op (CN=%v, SN=%v) at N=%v", kv.gid, kv.me, op.Config.Num, op.Shard, kv.nextExecSeqNum)
-		} else {
-			if !kv.reconfiguring {
-				println("S%v-%v rejects to apply InstallShard op (CN=%v, SN=%v) at N=%v due to not being reconfiguring", kv.gid, kv.me, op.Config.Num, op.Shard, kv.nextExecSeqNum)
-			} else {
-				println("S%v-%v rejects to apply InstallShard op (CN=%v, SN=%v) at N=%v due to State=%v", kv.gid, kv.me, op.Config.Num, op.Shard, kv.nextExecSeqNum, kv.shardDBs[op.Shard].state)
-			}
-		}
-
-	default:
-		log.Fatalf("unexpected admin op type %v", op.OpType)
-	}
-}
-
-func (kv *ShardKV) maybeApplyClientOp(op *Op) {
-	// apply the client op if it's not executed previously and the server is serving the shard.
-	if opId, exist := kv.maxApplyOpIdOfClerk[op.ClerkId]; (!exist || opId < op.OpId) && kv.isServingKey(op.Key) {
-		kv.applyClientOp(op)
-
-		// update the max applied op for each clerk to implement the at-most-once semantics.
-		kv.maxApplyOpIdOfClerk[op.ClerkId] = op.OpId
-
-		println("S%v-%v applied client op (C=%v Id=%v) at N=%v", kv.gid, kv.me, op.ClerkId, op.OpId, kv.nextExecSeqNum)
-	}
-}
-
-func (kv *ShardKV) applyClientOp(op *Op) {
-	// the write is applied on the corresponding shard.
-	shard := key2shard(op.Key)
-	db := kv.shardDBs[shard].dB
-
-	switch op.OpType {
-	case "Get":
-		// only write ops are applied to the database.
-
-	case "Put":
-		db[op.Key] = op.Value
-
-	case "Append":
-		// note: the default value is returned if the key does not exist.
-		println("S%v-%v appends %v to %v on K=%v", kv.gid, kv.me, op.Value, db[op.Key], op.Key)
-		db[op.Key] += op.Value
-		println("S%v-%v appends got=%v", kv.gid, kv.me, db[op.Key])
-
-	default:
-		log.Fatalf("unexpected client op type %v", op.OpType)
-	}
-}
-
-func (kv *ShardKV) isNoOp(op *Op) bool {
-	return op.OpType == "NoOp"
-}
-
-func (kv *ShardKV) noOpTicker() {
-	for !kv.isdead() {
-		op := &Op{OpType: "NoOp"}
-		go kv.propose(op)
-
-		time.Sleep(proposeNoOpInterval)
-	}
 }
 
 func (kv *ShardKV) kill() {
@@ -347,7 +207,7 @@ func StartServer(gid int64, shardmasters []string,
 
 	kv.gid = gid
 	kv.config = shardmaster.Config{Num: 0}
-	kv.reconfiguring = false
+	kv.reconfigureToConfigNum = -1
 	for i := range kv.shardDBs {
 		kv.shardDBs[i].dB = make(map[string]string)
 		kv.shardDBs[i].state = NotServing
