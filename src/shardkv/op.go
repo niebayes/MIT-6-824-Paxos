@@ -8,16 +8,16 @@ import (
 // the normal execution phase of an op/request consists of:
 // receive request, propose op, decide op, execute op, apply op, reply request.
 type Op struct {
-	ClerkId             int64
-	OpId                int
-	OpType              string // "Get", "Put", "Append", "InstallConfig", "InstallShard", "NoOp".
-	Key                 string
-	Value               string
-	Config              shardmaster.Config // the config to be installed.
-	ConfigNum           int                // the associated config num of the install shard op.
-	Shard               int                // install shard op will install the shard data DB on the shard Shard.
-	DB                  map[string]string
-	MaxApplyOpIdOfClerk map[int64]int // the clerk state would also be installed upon the installation of the shard data.
+	ClerkId                int64
+	OpId                   int
+	OpType                 string // "Get", "Put", "Append", "InstallConfig", "InstallShard", "NoOp".
+	Key                    string
+	Value                  string
+	Config                 shardmaster.Config // the config to be installed.
+	ReconfigureToConfigNum int                // the associated config num of the install shard op.
+	Shard                  int                // install shard op will install the shard data DB on the shard Shard.
+	DB                     map[string]string
+	MaxApplyOpIdOfClerk    map[int64]int // the clerk state would also be installed upon the installation of the shard data.
 }
 
 func isSameOp(opX *Op, opY *Op) bool {

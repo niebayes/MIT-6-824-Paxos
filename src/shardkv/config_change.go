@@ -23,8 +23,8 @@ func (kv *ShardKV) tick() {
 	// a config change is performed only if there's no pending config change.
 	// however, it's not necessary to reject proposing new configs during reconfiguring
 	// so long as we ensure that a reconfiguring starts only after the previous reconfiguring is completed.
-	if !kv.reconfiguring && nextConfig.Num == kv.config.Num+1 {
-		kv.reconfiguring = true
+	if kv.reconfigureToConfigNum == -1 && nextConfig.Num == kv.config.Num+1 {
+		kv.reconfigureToConfigNum = nextConfig.Num
 
 		// propose an install config op.
 		op := &Op{OpType: "InstallConfig", Config: nextConfig}
@@ -70,7 +70,7 @@ func (kv *ShardKV) installConfig(nextConfig shardmaster.Config) {
 
 	if !hasShardsToHandOff && !hasShardsToTakeOver {
 		// if the served shards do not change, the reconfiguring is done.
-		kv.reconfiguring = false
+		kv.reconfigureToConfigNum = -1
 
 		println("S%v-%v reconfigure done (CN=%v)", kv.gid, kv.me, kv.config.Num)
 		return
@@ -90,11 +90,11 @@ func (kv *ShardKV) installConfig(nextConfig shardmaster.Config) {
 		if hasShardsToHandOff {
 			go kv.handoffShards(kv.config.Num)
 
-			println("S%v-%v starts handing off shards %v", kv.gid, kv.me, hasShardsToHandOff)
+			println("S%v-%v starts handing off shards", kv.gid, kv.me)
 		}
 
 		if hasShardsToTakeOver {
-			println("S%v-%v waiting to take over shards %v", kv.gid, kv.me, hasShardsToTakeOver)
+			println("S%v-%v waiting to take over shards", kv.gid, kv.me)
 		}
 
 		// periodically check the migration state.

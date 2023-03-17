@@ -1,7 +1,11 @@
 package shardkv
 
-import "log"
-import "time"
+import (
+	"log"
+	"time"
+
+	"6.824/src/shardmaster"
+)
 
 // the reason why the thread is called `executor` instead of `applier` is that
 // all decided ops will be executed but not all ops will be applied.
@@ -102,9 +106,19 @@ func (kv *ShardKV) maybeApplyAdminOp(op *Op) {
 		// 	kv.installConfig(op.Config)
 		// }
 
-		if op.Config.Num == kv.config.Num+1 {
-			kv.reconfiguring = true
+		if (kv.reconfigureToConfigNum == op.Config.Num || op.Config.Num == kv.config.Num+1) && !kv.isMigrating() {
+			kv.reconfigureToConfigNum = op.Config.Num
 			kv.installConfig(op.Config)
+
+			println("S%v-%v installed config (ACN=%v)", kv.gid, kv.me, kv.config.Num)
+			shardmaster.PrintGidToShards(&kv.config, DEBUG)
+		} else {
+			if kv.isMigrating() {
+				println("S%v-%v rejects to install config (ACN=%v) due to being migrating", kv.gid, kv.me, op.Config.Num)
+			}
+			if kv.reconfigureToConfigNum != op.Config.Num && op.Config.Num == kv.config.Num+1 {
+				println("S%v-%v rejects to install config (ACN=%v) due to inconsistent reconfiguring (CN=%v RCN=%v)", kv.gid, kv.me, op.Config.Num, kv.config.Num, kv.reconfigureToConfigNum)
+			}
 		}
 
 	case "InstallShard":
@@ -145,8 +159,21 @@ func (kv *ShardKV) maybeApplyAdminOp(op *Op) {
 		// for the sake of safety, we choose to add the config num checking to work around the issue
 		// we mentioned above.
 
-		if kv.shardDBs[op.Shard].state == MovingIn {
+		if kv.reconfigureToConfigNum == op.ReconfigureToConfigNum && kv.config.Num == kv.reconfigureToConfigNum && kv.shardDBs[op.Shard].state == MovingIn {
 			kv.installShard(op)
+		} else {
+
+			if kv.config.Num != kv.reconfigureToConfigNum {
+				println("S%v-%v rejects InstallShard due to I'm not reconfiguring (CN=%v RCN=%v ACN=%v SN=%v)", kv.gid, kv.me, kv.config.Num, kv.reconfigureToConfigNum, op.ReconfigureToConfigNum, op.Shard)
+			}
+
+			if op.ReconfigureToConfigNum != kv.reconfigureToConfigNum {
+				println("S%v-%v rejects InstallShard due to not reconfiguring to the same config (CN=%v ACN=%v SN=%v)", kv.gid, kv.me, kv.reconfigureToConfigNum, op.ReconfigureToConfigNum, op.Shard)
+			}
+
+			if kv.shardDBs[op.Shard].state != MovingIn {
+				println("S%v-%v rejects InstallShard due to state %v (CN=%v ACN=%v SN=%v)", kv.gid, kv.me, kv.shardDBs[op.Shard].state, kv.reconfigureToConfigNum, op.ReconfigureToConfigNum, op.Shard)
+			}
 		}
 
 	default:
@@ -167,7 +194,7 @@ func (kv *ShardKV) maybeApplyClientOp(op *Op) {
 			println("S%v-%v discards client op due to already applied (C=%v Id=%v) at N=%v", kv.gid, kv.me, op.ClerkId, op.OpId, kv.nextExecSeqNum)
 		}
 		if !kv.isServingKey(op.Key) {
-			println("S%v-%v discards client op due to not serving (C=%v Id=%v) at N=%v", kv.gid, kv.me, op.ClerkId, op.OpId, kv.nextExecSeqNum)
+			println("S%v-%v discards client op due to not serving with state=%v (C=%v Id=%v) at N=%v", kv.gid, kv.me, kv.shardDBs[op.Shard].state, op.ClerkId, op.OpId, kv.nextExecSeqNum)
 		}
 	}
 }
@@ -186,7 +213,7 @@ func (kv *ShardKV) applyClientOp(op *Op) {
 
 	case "Append":
 		// note: the default value is returned if the key does not exist.
-		println("S%v-%v appens %v to %v", kv.gid, kv.me, op.Value, db[op.Key])
+		println("S%v-%v appends %v to %v", kv.gid, kv.me, op.Value, db[op.Key])
 		db[op.Key] += op.Value
 
 	default:

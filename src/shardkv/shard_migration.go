@@ -6,10 +6,10 @@ import "6.824/src/shardmaster"
 type InstallShardArgs struct {
 	// the receiver would reject the shard if it's not in the same config.
 	// see the reasoning in `InstallShard`.
-	ConfigNum           int               // sender's current config number.
-	Shard               int               // shard id.
-	DB                  map[string]string // shard data.
-	MaxApplyOpIdOfClerk map[int64]int     // necessary for implementing the at-most-once semantics.
+	ReconfigureToConfigNum int               // sender's current config number.
+	Shard                  int               // shard id.
+	DB                     map[string]string // shard data.
+	MaxApplyOpIdOfClerk    map[int64]int     // necessary for implementing the at-most-once semantics.
 }
 
 type InstallShardReply struct {
@@ -20,10 +20,12 @@ func (kv *ShardKV) makeInstallShardArgs(shard int) InstallShardArgs {
 	shardDB := kv.shardDBs[shard]
 
 	args := InstallShardArgs{
-		ConfigNum:           kv.config.Num,
-		Shard:               shard,
-		DB:                  make(map[string]string),
-		MaxApplyOpIdOfClerk: make(map[int64]int),
+		// since kv.config.Num and kv.reconfigureToConfigNum must be identical at this time,
+		// either of which could be assigned to ConfigNum.
+		ReconfigureToConfigNum: kv.reconfigureToConfigNum,
+		Shard:                  shard,
+		DB:                     make(map[string]string),
+		MaxApplyOpIdOfClerk:    make(map[int64]int),
 	}
 
 	// deep clone shard data.
@@ -55,7 +57,7 @@ func (kv *ShardKV) handoffShards(configNum int) {
 		// by the current reconfiguring.
 		// although this is okay, we choose to associate each `handoffShards` to a reconfiguring
 		// and kill it once the corresponding reconfiguring is done.
-		if kv.config.Num != configNum || !kv.reconfiguring {
+		if kv.config.Num != configNum || kv.reconfigureToConfigNum != configNum {
 			kv.mu.Unlock()
 			break
 		}
@@ -95,13 +97,13 @@ func (kv *ShardKV) checkMigrationState(configNum int) {
 		kv.mu.Lock()
 
 		// see the reasoning in `handoffShards`.
-		if kv.config.Num != configNum || !kv.reconfiguring {
+		if kv.config.Num != configNum || kv.reconfigureToConfigNum != configNum {
 			kv.mu.Unlock()
 			break
 		}
 
 		if !kv.isMigrating() {
-			kv.reconfiguring = false
+			kv.reconfigureToConfigNum = -1
 			println("S%v-%v reconfigure done (CN=%v)", kv.gid, kv.me, kv.config.Num)
 			kv.mu.Unlock()
 			break
@@ -152,7 +154,20 @@ func (kv *ShardKV) InstallShard(args *InstallShardArgs, reply *InstallShardReply
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 
-	// reject the shard since the receiver and the sender are not in the same config.
+	// the args' config num is the sender's reconfigureToConfigNum.
+	// if it's less than or equal to the receiver's current config num, this means the receiver has
+	// installed the shards and has done the configuring.
+	// the reply OK of the previous InstallShards may get lost due to network issues
+	// and the sender re-sends the install shard requests to the receiver.
+	// if we do not reply OK, the sender will keep re-sending the requests and make no progress.
+	if args.ReconfigureToConfigNum < kv.config.Num {
+		reply.Err = OK
+		println("S%v-%v rejects InstallShard due to already installed (CN=%v ACN=%v SN=%v)", kv.gid, kv.me, kv.config.Num, args.ReconfigureToConfigNum, args.Shard)
+		return nil
+	}
+
+	// accept the shard only if the receiver and the sender are reconfiguring to the same config
+	// and the shard has not been installed yet.
 	// for example, the group serves a shard in the last config and moves the shard out in the current config.
 	// it then serves the shard in the next config.
 	// due to network delay and other issues, the install shard request corresponding to the last config
@@ -160,37 +175,41 @@ func (kv *ShardKV) InstallShard(args *InstallShardArgs, reply *InstallShardReply
 	// if we do not reject the request, the stale shard data may get installed.
 	// although we could delay the staleness checking to the time the op gets executed,
 	// it'd be better to filter out such requests upon receiving the requests.
-	if args.ConfigNum != kv.config.Num {
-		reply.Err = ErrNotApplied
-		println("S%v-%v rejects InstallShard due to inconsistent config (CN=%v ACN=%v SN=%v)", kv.gid, kv.me, kv.config.Num, args.ConfigNum, args.Shard)
-		return nil
-	}
+	if args.ReconfigureToConfigNum == kv.reconfigureToConfigNum && kv.config.Num == kv.reconfigureToConfigNum && kv.shardDBs[args.Shard].state == MovingIn {
+		// note, there's a gap between the proposing of the op and the execution of the op.
+		// we could filter the dup op so that the bandwidth pressure on the paxos level could be reduced.
+		// however, this would require us to assign a unique server id and op id for each admin op.
+		// hence, we choose not to filter out dup admin ops but restricted to apply it at most once.
 
-	// reject the shard since the receiver has installed the shard.
-	if kv.shardDBs[args.Shard].state != MovingIn {
+		println("S%v-%v accepts InstallShard (ACN=%v SN=%v)", kv.gid, kv.me, args.ReconfigureToConfigNum, args.Shard)
+
+		op := &Op{OpType: "InstallShard", ReconfigureToConfigNum: args.ReconfigureToConfigNum, Shard: args.Shard, DB: args.DB, MaxApplyOpIdOfClerk: args.MaxApplyOpIdOfClerk}
+		go kv.propose(op)
+
+		// reply OK so that the sender knows an install shard op is proposed.
+		// warning: immediately replying OK is okay only if there's no server crash.
+		// if the server may crash, the proposer thread is killed and the install shard op is lost.
+		// however, the sender would not re-send the shard data since OK is replied.
+		// if there's server crash, the correct way is to let the receiver replies OK only if the
+		// install shard op is applied.
 		reply.Err = OK
-		println("S%v-%v rejects InstallShard due to already installed (ACN=%v SN=%v)", kv.gid, kv.me, args.ConfigNum, args.Shard)
+
 		return nil
 	}
 
-	println("S%v-%v accepts InstallShard (ACN=%v SN=%v)", kv.gid, kv.me, args.ConfigNum, args.Shard)
+	if kv.config.Num != kv.reconfigureToConfigNum {
+		println("S%v-%v rejects InstallShard due to I'm not reconfiguring (CN=%v RCN=%v ACN=%v SN=%v)", kv.gid, kv.me, kv.config.Num, kv.reconfigureToConfigNum, args.ReconfigureToConfigNum, args.Shard)
+	}
 
-	// note, there's a gap between the proposing of the op and the execution of the op.
-	// we could filter the dup op so that the bandwidth pressure on the paxos level could be reduced.
-	// however, this would require us to assign a unique server id and op id for each admin op.
-	// hence, we choose not to filter out dup admin ops but restricted to apply it at most once.
+	if args.ReconfigureToConfigNum != kv.reconfigureToConfigNum {
+		println("S%v-%v rejects InstallShard due to not reconfiguring to the same config (CN=%v ACN=%v SN=%v)", kv.gid, kv.me, kv.reconfigureToConfigNum, args.ReconfigureToConfigNum, args.Shard)
+	}
 
-	// propose an install shard op.
-	op := &Op{OpType: "InstallShard", ConfigNum: args.ConfigNum, Shard: args.Shard, DB: args.DB, MaxApplyOpIdOfClerk: args.MaxApplyOpIdOfClerk}
-	go kv.propose(op)
+	if kv.shardDBs[args.Shard].state != MovingIn {
+		println("S%v-%v rejects InstallShard due to state %v (CN=%v ACN=%v SN=%v)", kv.gid, kv.me, kv.shardDBs[args.Shard].state, kv.reconfigureToConfigNum, args.ReconfigureToConfigNum, args.Shard)
+	}
 
-	// reply OK so that the sender knows an install shard op is proposed.
-	// warning: immediately replying OK is okay only if there's no server crash.
-	// if the server may crash, the proposer thread is killed and the install shard op is lost.
-	// however, the sender would not re-send the shard data since OK is replied.
-	// if there's server crash, the correct way is to let the receiver replies OK only if the
-	// install shard op is applied.
-	reply.Err = OK
+	reply.Err = ErrNotApplied
 
 	return nil
 }
