@@ -20,9 +20,6 @@ func (px *Paxos) maybeUpdateMaxSeenPropNum(propNum int) {
 // in summary, we need to allocate a proposal greater than the highest proposal number this peer
 // ever seen whenever we want to initiate a new round of paxos.
 func (px *Paxos) choosePropNum() int {
-	px.mu.Lock()
-	defer px.mu.Unlock()
-
 	propNum := px.maxSeenPropNum
 	for propNum <= px.maxSeenPropNum {
 		propNum = px.me + px.roundNum*len(px.peers)
@@ -40,6 +37,9 @@ func (px *Paxos) choosePropNum() int {
 // since quorum intersection property is only hold between adjacent rounds of paxos, the value
 // to be proposed must the accepted in the last round, i.e. the round with the highest accepted proposal number.
 func (px *Paxos) choosePropValue(ins *Instance) {
+	px.mu.Lock()
+	defer px.mu.Unlock()
+
 	maxPropNum := -1
 	for i := range px.peers {
 		// warning, must consider the accepted proposal of our own since this value comes from others and it might be decided.
@@ -77,12 +77,17 @@ func (px *Paxos) propose(seqNum int, value interface{}) {
 		px.mu.Lock()
 		ins := px.getInstance(seqNum)
 		px.resetInstance(ins, value)
-		px.mu.Unlock()
 
 		// choose a proposal number greater than the highest proposal number this peer ever seen.
 		ins.propNum = px.choosePropNum()
 
-		printf("S%v starts proposing (N=%v P=%v V=%v)", px.me, ins.seqNum, ins.propNum, ins.propValue)
+		// bookeeping to workaround races.
+		propNum := ins.propNum
+		propValue := ins.propValue
+
+		px.mu.Unlock()
+
+		printf("S%v starts proposing (N=%v P=%v V=%v)", px.me, seqNum, propNum, propValue)
 
 		// broadcast prepares to all peers until timeout or majority prepared.
 		done := make(chan bool)
@@ -91,15 +96,15 @@ func (px *Paxos) propose(seqNum int, value interface{}) {
 		select {
 		case majorityPrepared := <-done:
 			if !majorityPrepared {
-				printf("S%v retries proposal (N=%v P=%v V=%v)", px.me, ins.seqNum, ins.propNum, ins.propValue)
+				printf("S%v retries proposal (N=%v P=%v V=%v)", px.me, seqNum, propNum, propValue)
 				continue
 			}
 		case <-time.After(proposeTimeout):
-			printf("S%v knows proposal (N=%v P=%v V=%v) timeouts", px.me, ins.seqNum, ins.propNum, ins.propValue)
+			printf("S%v knows proposal (N=%v P=%v V=%v) timeouts", px.me, seqNum, propNum, propValue)
 			continue
 		}
 
-		printf("S%v knows proposal (N=%v P=%v V=%v) was prepared by a majority", px.me, ins.seqNum, ins.propNum, ins.propValue)
+		printf("S%v knows proposal (N=%v P=%v V=%v) was prepared by a majority", px.me, seqNum, propNum, propValue)
 
 		// choose the proposed value with the highest proposal number among all prepared peers.
 		// if there're none, choose our own value otherwise.
@@ -112,15 +117,15 @@ func (px *Paxos) propose(seqNum int, value interface{}) {
 		select {
 		case majorityAccepted := <-done:
 			if !majorityAccepted {
-				printf("S%v retries proposal (N=%v P=%v V=%v)", px.me, ins.seqNum, ins.propNum, ins.propValue)
+				printf("S%v retries proposal (N=%v P=%v V=%v)", px.me, seqNum, propNum, propValue)
 				continue
 			}
 		case <-time.After(proposeTimeout):
-			printf("S%v knows proposal (N=%v P=%v V=%v) timeouts", px.me, ins.seqNum, ins.propNum, ins.propValue)
+			printf("S%v knows proposal (N=%v P=%v V=%v) timeouts", px.me, seqNum, propNum, propValue)
 			continue
 		}
 
-		printf("S%v knows proposal (N=%v P=%v V=%v) was accepted by a majority", px.me, ins.seqNum, ins.propNum, ins.propValue)
+		printf("S%v knows proposal (N=%v P=%v V=%v) was accepted by a majority", px.me, seqNum, propNum, propValue)
 
 		// set decided.
 		px.mu.Lock()

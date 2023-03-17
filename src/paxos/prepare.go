@@ -6,6 +6,9 @@ import (
 
 // return true if a majority of acceptors has been prepared for this instance.
 func (px *Paxos) majorityPrepared(ins *Instance) bool {
+	px.mu.Lock()
+	defer px.mu.Unlock()
+
 	numPrepared := 0
 	for i := range px.peers {
 		if ins.prepareOK[i] {
@@ -16,8 +19,8 @@ func (px *Paxos) majorityPrepared(ins *Instance) bool {
 	return numPrepared*2 > len(px.peers)
 }
 
-func (px *Paxos) sendPrepare(peer int, ins *Instance, wg *sync.WaitGroup) {
-	args := &PrepareArgs{Me: px.me, SeqNum: ins.seqNum, PropNum: ins.propNum}
+func (px *Paxos) sendPrepare(peer, seqNum, propNum int, wg *sync.WaitGroup) {
+	args := &PrepareArgs{Me: px.me, SeqNum: seqNum, PropNum: propNum}
 	reply := &PrepareReply{}
 	if call(px.peers[peer], "Paxos.Prepare", args, reply) {
 		px.handlePrepareReply(args, reply)
@@ -29,16 +32,22 @@ func (px *Paxos) sendPrepare(peer int, ins *Instance, wg *sync.WaitGroup) {
 }
 
 func (px *Paxos) broadcastPrepares(ins *Instance, done chan bool) {
+	// bookeeping to workaround races.
+	px.mu.Lock()
+	seqNum := ins.seqNum
+	propNum := ins.propNum
+	px.mu.Unlock()
+
 	wg := &sync.WaitGroup{}
 	wg.Add(len(px.peers))
 
 	for i := range px.peers {
 		if i != px.me {
-			go px.sendPrepare(i, ins, wg)
+			go px.sendPrepare(i, seqNum, propNum, wg)
 		} else {
 			// make a local call if the receiver is myself.
 			go func() {
-				args := &PrepareArgs{Me: px.me, SeqNum: ins.seqNum, PropNum: ins.propNum}
+				args := &PrepareArgs{Me: px.me, SeqNum: seqNum, PropNum: propNum}
 				reply := &PrepareReply{}
 				px.Prepare(args, reply)
 				px.handlePrepareReply(args, reply)

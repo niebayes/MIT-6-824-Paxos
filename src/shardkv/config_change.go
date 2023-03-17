@@ -51,8 +51,19 @@ func (kv *ShardKV) installConfig(nextConfig shardmaster.Config) {
 		newGid := nextConfig.Shards[shard]
 
 		if currGid == 0 && newGid == kv.gid {
-			// nothing to move if the from group is the invalid group 0.
+			// nothing to move in if the from group is the invalid group 0.
 			kv.shardDBs[shard].state = Serving
+
+			println("S%v-%v set shard (SN=%v) to state=%v at installing config (ACN=%v CN=%v)", kv.gid, kv.me, shard, kv.shardDBs[shard].state, nextConfig.Num, kv.config.Num)
+			continue
+		}
+
+		// FIXME: this seems not necessary.
+		if newGid == 0 {
+			// noting to move out if the to group is the invalid group 0.
+			kv.shardDBs[shard].state = NotServing
+
+			println("S%v-%v set shard (SN=%v) to state=%v at installing config (ACN=%v CN=%v)", kv.gid, kv.me, shard, kv.shardDBs[shard].state, nextConfig.Num, kv.config.Num)
 			continue
 		}
 
@@ -61,20 +72,24 @@ func (kv *ShardKV) installConfig(nextConfig shardmaster.Config) {
 			kv.shardDBs[shard].state = MovingOut
 			kv.shardDBs[shard].toGid = newGid
 			hasShardsToHandOff = true
+
+			println("S%v-%v set shard (SN=%v) to state=%v at installing config (ACN=%v CN=%v)", kv.gid, kv.me, shard, kv.shardDBs[shard].state, nextConfig.Num, kv.config.Num)
 		}
 		if currGid != kv.gid && newGid == kv.gid {
 			// move this shard from the group with gid currGid to this group.
 			kv.shardDBs[shard].state = MovingIn
 			kv.shardDBs[shard].fromGid = currGid
 			hasShardsToTakeOver = true
+
+			println("S%v-%v set shard (SN=%v) to state=%v at installing config (ACN=%v CN=%v)", kv.gid, kv.me, shard, kv.shardDBs[shard].state, nextConfig.Num, kv.config.Num)
 		}
 	}
 
 	// install the next config.
 	kv.config = nextConfig
 
+	// if the served shards do not change, the reconfiguring is done.
 	if !hasShardsToHandOff && !hasShardsToTakeOver {
-		// if the served shards do not change, the reconfiguring is done.
 		kv.reconfigureToConfigNum = -1
 
 		println("S%v-%v reconfigure done (CN=%v)", kv.gid, kv.me, kv.config.Num)
@@ -82,28 +97,13 @@ func (kv *ShardKV) installConfig(nextConfig shardmaster.Config) {
 
 	} else {
 		// otherwise, the server has to take over moved-in shards or/and hand off moved-out shards.
-
-		// the shard migration is performed in a push-based way, i.e. the initiator of a shard migration
-		// is the replica group who is going to handoff shards.
-		// on contrary, if performed in a pull-based way, the initiator of the shard migration is
-		// the replica group who is going to take over shards. This replica group sends a pull request
-		// to another replica group, and then that replica group starts sending shard data to the sender.
-		//
-		// deciding on which migration way to use is tricky, but generally the pull-based is prefered since
-		// there mighe be less shard data to transfer by network since shard pulling is on demand while
-		// shard pushing is not.
 		if hasShardsToHandOff {
-			go kv.handoffShards(kv.config.Num)
-
 			println("S%v-%v starts handing off shards", kv.gid, kv.me)
 		}
 
 		if hasShardsToTakeOver {
 			println("S%v-%v waiting to take over shards", kv.gid, kv.me)
 		}
-
-		// periodically check the migration state.
-		go kv.checkMigrationState(kv.config.Num)
 	}
 }
 

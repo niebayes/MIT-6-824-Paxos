@@ -186,6 +186,10 @@ func (kv *ShardKV) maybeApplyAdminOp(op *Op) {
 func (kv *ShardKV) maybeApplyClientOp(op *Op) {
 	println("S%v-%v is going to apply. K=%v key2shard=%v state=%v", kv.gid, kv.me, op.Key, key2shard(op.Key), kv.shardDBs[key2shard(op.Key)].state)
 
+	if !kv.isApplied(op) && kv.shardDBs[key2shard(op.Key)].state == Serving {
+		println("S%v-%v can apply client op (C=%v Id=%v) at N=%v", kv.gid, kv.me, op.ClerkId, op.OpId, kv.nextExecSeqNum)
+	}
+
 	if !kv.isApplied(op) && kv.isServingKey(op.Key) {
 		kv.applyClientOp(op)
 		kv.maxApplyOpIdOfClerk[op.ClerkId] = op.OpId
@@ -196,7 +200,7 @@ func (kv *ShardKV) maybeApplyClientOp(op *Op) {
 			println("S%v-%v discards client op due to already applied (C=%v Id=%v) at N=%v", kv.gid, kv.me, op.ClerkId, op.OpId, kv.nextExecSeqNum)
 		}
 		if !kv.isServingKey(op.Key) {
-			println("S%v-%v discards client op due to not serving with state=%v (C=%v Id=%v) at N=%v", kv.gid, kv.me, kv.shardDBs[op.Shard].state, op.ClerkId, op.OpId, kv.nextExecSeqNum)
+			println("S%v-%v discards client op due to not serving with state=%v (C=%v Id=%v) at N=%v", kv.gid, kv.me, kv.shardDBs[key2shard(op.Key)].state, op.ClerkId, op.OpId, kv.nextExecSeqNum)
 			println("S%v-%v K=%v key2shard=%v state=%v", kv.gid, kv.me, op.Key, key2shard(op.Key), kv.shardDBs[key2shard(op.Key)].state)
 		}
 	}

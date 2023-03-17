@@ -14,11 +14,17 @@ func (px *Paxos) broadcastDecides(ins *Instance) {
 	px.mu.Lock()
 	defer px.mu.Unlock()
 
+	// bookeeping to workaround races.
+	seqNum := ins.seqNum
+	propNum := ins.propNum
+	propValue := ins.propValue
+	doneSeqNum := px.maxDoneSeqNum[px.me]
+
 	for i := range px.peers {
 		if i != px.me {
 			// due to forgetting, the paxos instance may be deleted and hence the ins pointer may point to a nil.
 			// for the sake of safety, we need to wrap the needed args into closure.
-			go px.sendDecide(i, ins.seqNum, ins.propNum, px.maxDoneSeqNum[px.me], ins.propValue)
+			go px.sendDecide(i, seqNum, propNum, doneSeqNum, propValue)
 		} else {
 			// make a local call if the receiver is myself.
 			go func(seqNum, propNum, doneSeqNum int, value interface{}) {
@@ -26,7 +32,7 @@ func (px *Paxos) broadcastDecides(ins *Instance) {
 				reply := &DecideReply{}
 				px.Decide(args, reply)
 				px.handleDecideReply(reply)
-			}(ins.seqNum, ins.propNum, px.maxDoneSeqNum[px.me], ins.propValue)
+			}(seqNum, propNum, doneSeqNum, propValue)
 		}
 	}
 }

@@ -18,7 +18,6 @@ const backoffFactor = 2
 const maxWaitTime = 1000 * time.Millisecond
 const initSleepTime = 10 * time.Millisecond
 const maxSleepTime = 500 * time.Millisecond
-const handoffShardsInterval = 200 * time.Millisecond
 const checkMigrationStateInterval = 200 * time.Millisecond
 const proposeNoOpInterval = 250 * time.Millisecond
 
@@ -236,6 +235,9 @@ func StartServer(gid int64, shardmasters []string,
 
 	// start a thread to periodically propose no-ops in order to let the server catches up quickly.
 	go kv.noOpTicker()
+
+	// start a thread to monitor migration state periodically.
+	go kv.migrator()
 
 	go func() {
 		for !kv.isdead() {

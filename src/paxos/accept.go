@@ -6,6 +6,9 @@ import (
 
 // return true if a majority of acceptors has accepted this proposal.
 func (px *Paxos) majorityAccepted(ins *Instance) bool {
+	px.mu.Lock()
+	defer px.mu.Unlock()
+
 	numAccepted := 0
 	for i := range px.peers {
 		if ins.acceptOK[i] {
