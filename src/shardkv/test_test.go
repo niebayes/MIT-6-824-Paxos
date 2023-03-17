@@ -129,7 +129,6 @@ func TestBasic(t *testing.T) {
 	fmt.Printf("Test: Basic Join/Leave ...\n")
 
 	// join the group 0.
-	fmt.Printf("join G0\n")
 	tc.join(0)
 
 	ck := tc.clerk()
@@ -153,7 +152,6 @@ func TestBasic(t *testing.T) {
 	// after each join, check if the all the kv pairs can still be fetched,
 	// and the replied value is the expected one.
 	for g := 1; g < len(tc.groups); g++ {
-		fmt.Printf("join G%v\n", g)
 		tc.join(g)
 		time.Sleep(1 * time.Second)
 		for i := 0; i < len(keys); i++ {
@@ -171,7 +169,6 @@ func TestBasic(t *testing.T) {
 	// after each leave, check if the all the kv pairs can still be fetched,
 	// and the replied value is the expected one.
 	for g := 0; g < len(tc.groups)-1; g++ {
-		fmt.Printf("leave G%v\n", g)
 		tc.leave(g)
 		time.Sleep(1 * time.Second)
 		for i := 0; i < len(keys); i++ {
@@ -196,7 +193,6 @@ func TestMove(t *testing.T) {
 
 	fmt.Printf("Test: Shards really move ...\n")
 
-	fmt.Printf("Add G0\n")
 	tc.join(0)
 
 	time.Sleep(2 * time.Second)
@@ -205,26 +201,20 @@ func TestMove(t *testing.T) {
 
 	// insert one key per shard
 	for i := 0; i < shardmaster.NShards; i++ {
-		// ck.Put(string('0'+i), string('0'+i))
-		fmt.Printf("Put key %v\n", i)
 		ck.Put(strconv.Itoa(i), strconv.Itoa(i))
 	}
 
 	// add group 1.
-	fmt.Printf("Add G1\n")
 	tc.join(1)
 	time.Sleep(5 * time.Second)
 
 	// check that keys are still there.
 	for i := 0; i < shardmaster.NShards; i++ {
-		// if ck.Get(string('0'+i)) != string('0'+i) {
-		fmt.Printf("Get key %v\n", i)
 		if ck.Get(strconv.Itoa(i)) != strconv.Itoa(i) {
 			t.Fatalf("missing key/value")
 		}
 	}
 
-	fmt.Printf("Kill G0\n")
 	// remove sockets from group 0.
 	for _, port := range tc.groups[0].ports {
 		os.Remove(port)
@@ -235,9 +225,6 @@ func TestMove(t *testing.T) {
 	for i := 0; i < shardmaster.NShards; i++ {
 		go func(me int) {
 			myck := tc.clerk()
-			// v := myck.Get(string('0' + me))
-			// if v == string('0'+me) {
-			fmt.Printf("Get key %v\n", me)
 			v := myck.Get(strconv.Itoa(me))
 			if v == strconv.Itoa(me) {
 				mu.Lock()
@@ -342,7 +329,6 @@ func doConcurrent(t *testing.T, unreliable bool) {
 	defer tc.cleanup()
 
 	for i := 0; i < len(tc.groups); i++ {
-		fmt.Printf("join G%v\n", tc.groups[i].gid)
 		tc.join(i)
 	}
 
@@ -358,18 +344,14 @@ func doConcurrent(t *testing.T, unreliable bool) {
 			mymck := tc.shardclerk()
 
 			key := strconv.Itoa(me)
-			println("N%v K=%v is in shard %v", me, key, key2shard(key))
 			last := ""
 
 			for iters := 0; iters < 3; iters++ {
 				nv := strconv.Itoa(rand.Int())
-				fmt.Printf("N%v appends (K=%v V=%v)\n", me, key, nv)
 				ck.Append(key, nv)
 				last = last + nv
 
-				fmt.Printf("N%v gets (K=%v expected=%v)\n", me, key, last)
 				v := ck.Get(key)
-				fmt.Printf("N%v gets (K=%v got=%v)\n", me, key, v)
 				if v != last {
 					ok = false
 					t.Fatalf("Get(%v) expected %v got %v\n", key, last, v)
@@ -380,12 +362,7 @@ func doConcurrent(t *testing.T, unreliable bool) {
 				gid := tc.groups[gi].gid
 
 				shardNum := rand.Int() % shardmaster.NShards
-				fmt.Printf("Move shard %v to G%v\n", shardNum, gid)
 				mymck.Move(shardNum, gid)
-
-				latestConfig := mymck.Query(-1)
-				fmt.Printf("latest config (CN=%v)\n", latestConfig.Num)
-				shardmaster.PrintGidToShards(&latestConfig, DEBUG)
 
 				time.Sleep(time.Duration(rand.Int()%30) * time.Millisecond)
 			}
