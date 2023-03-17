@@ -209,8 +209,6 @@ func (kv *ShardKV) InstallShard(args *InstallShardArgs, reply *InstallShardReply
 	return nil
 }
 
-// FIXME: found the bug: seems servers in a group do not install shards and configs in sync.
-// FIXME: might be a bug: new config fetching and config update in shardmaster may be broken.
 func (kv *ShardKV) installShard(op *Op) {
 	// install server state.
 	// the installation could be performed either by replacing or updating.

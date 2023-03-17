@@ -105,7 +105,7 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) error {
 	}
 	kv.mu.Unlock()
 
-	// FIXME: found a bug: the max apply op if is shared by all shards.
+	// warning: the max apply op if is shared by all shards.
 	// and therefore delete shard cannot delete the portion in the max apply op id map
 	// corresponding to the deleted shard.
 	// so the service handler would still reply if the op was applied even if

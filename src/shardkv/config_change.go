@@ -58,7 +58,7 @@ func (kv *ShardKV) installConfig(nextConfig shardmaster.Config) {
 			continue
 		}
 
-		// FIXME: this seems not necessary.
+		// warning: this seems not necessary.
 		if newGid == 0 {
 			// noting to move out if the to group is the invalid group 0.
 			kv.shardDBs[shard].state = NotServing

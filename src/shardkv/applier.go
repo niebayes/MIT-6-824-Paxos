@@ -191,8 +191,6 @@ func (kv *ShardKV) maybeApplyAdminOp(op *Op) {
 	}
 }
 
-// FIXME: leave a bug: a client op is only applied by one server in a replica group.
-// maybe fix the bug by reverting to use reconfiguring instead of reconfigureToConfigNum.
 func (kv *ShardKV) maybeApplyClientOp(op *Op) {
 	if !kv.isApplied(op) && kv.isServingKey(op.Key) {
 		kv.applyClientOp(op)

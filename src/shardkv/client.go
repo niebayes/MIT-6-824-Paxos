@@ -76,7 +76,7 @@ func (ck *Clerk) Get(key string) string {
 
 		// ask the shardmaster for the latest configuration.
 		//
-		// FIXME: it's possible that the config change is too often so that
+		// note: it's possible that the config change is too often so that
 		// the server's config is way too lag-behind than the client's config.
 		// since the config change and shard migration may be time-consuming,
 		// the client might have to wait a long time to wait the server changes
