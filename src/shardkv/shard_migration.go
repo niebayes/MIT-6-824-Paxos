@@ -55,7 +55,7 @@ func (kv *ShardKV) handoffShards(configNum int) {
 		// by the current reconfiguring.
 		// although this is okay, we choose to associate each `handoffShards` to a reconfiguring
 		// and kill it once the corresponding reconfiguring is done.
-		if kv.config.Num != configNum || kv.reconfigureToConfigNum != configNum {
+		if kv.config.Num != configNum || !kv.reconfiguring {
 			kv.mu.Unlock()
 			break
 		}
@@ -95,13 +95,13 @@ func (kv *ShardKV) checkMigrationState(configNum int) {
 		kv.mu.Lock()
 
 		// see the reasoning in `handoffShards`.
-		if kv.config.Num != configNum || kv.reconfigureToConfigNum != configNum {
+		if kv.config.Num != configNum || !kv.reconfiguring {
 			kv.mu.Unlock()
 			break
 		}
 
 		if !kv.isMigrating() {
-			kv.reconfigureToConfigNum = -1
+			kv.reconfiguring = false
 			println("S%v-%v reconfigure done (CN=%v)", kv.gid, kv.me, kv.config.Num)
 			kv.mu.Unlock()
 			break

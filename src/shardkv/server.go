@@ -60,7 +60,7 @@ type ShardKV struct {
 	config shardmaster.Config
 	// the config num of the config the server is reconfiguring to.
 	// set to -1 if the server is not reconfiguring.
-	reconfigureToConfigNum int
+	reconfiguring bool
 
 	// in order to interact with paxos, the following fields must be used.
 
@@ -207,7 +207,7 @@ func StartServer(gid int64, shardmasters []string,
 
 	kv.gid = gid
 	kv.config = shardmaster.Config{Num: 0}
-	kv.reconfigureToConfigNum = -1
+	kv.reconfiguring = false
 	for i := range kv.shardDBs {
 		kv.shardDBs[i].dB = make(map[string]string)
 		kv.shardDBs[i].state = NotServing

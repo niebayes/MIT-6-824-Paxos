@@ -97,13 +97,13 @@ func (kv *ShardKV) maybeApplyAdminOp(op *Op) {
 		// since lab4 does not involve server crash, the checking for migration state is not necessary.
 		//
 		// in summary, the canonical codes are the following whether there's server crash or not.
-		// if op.Config.Num == kv.config.Num+1 && !kv.isMigrating() {
-		// 	kv.reconfiguring = true
+		// if (kv.reconfigureToConfigNum == op.Config.Num || op.Config.Num == kv.config.Num+1) && !kv.isMigrating() {
+		// 	kv.reconfigureToConfigNum = op.Config.Num
 		// 	kv.installConfig(op.Config)
 		// }
 
-		if (kv.reconfigureToConfigNum == op.Config.Num || op.Config.Num == kv.config.Num+1) && !kv.isMigrating() {
-			kv.reconfigureToConfigNum = op.Config.Num
+		if op.Config.Num == kv.config.Num+1 {
+			kv.reconfiguring = true
 			kv.installConfig(op.Config)
 		}
 
@@ -142,10 +142,10 @@ func (kv *ShardKV) maybeApplyAdminOp(op *Op) {
 		// however, simply applying the migration state checking is able to make the
 		// program pass the tests for 500 times without any error.
 		//
-		// for the sake of safety, we choose to add the config num checking to wordaround the issue
+		// for the sake of safety, we choose to add the config num checking to work around the issue
 		// we mentioned above.
 
-		if kv.reconfigureToConfigNum == op.ConfigNum && kv.shardDBs[op.Shard].state == MovingIn {
+		if kv.shardDBs[op.Shard].state == MovingIn {
 			kv.installShard(op)
 		}
 
