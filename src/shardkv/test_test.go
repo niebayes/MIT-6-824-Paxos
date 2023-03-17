@@ -342,6 +342,7 @@ func doConcurrent(t *testing.T, unreliable bool) {
 	defer tc.cleanup()
 
 	for i := 0; i < len(tc.groups); i++ {
+		fmt.Printf("join G%v\n", tc.groups[i].gid)
 		tc.join(i)
 	}
 
@@ -381,6 +382,10 @@ func doConcurrent(t *testing.T, unreliable bool) {
 				shardNum := rand.Int() % shardmaster.NShards
 				fmt.Printf("Move shard %v to G%v\n", shardNum, gid)
 				mymck.Move(shardNum, gid)
+
+				latestConfig := mymck.Query(-1)
+				fmt.Printf("latest config (CN=%v)\n", latestConfig.Num)
+				shardmaster.PrintGidToShards(&latestConfig, DEBUG)
 
 				time.Sleep(time.Duration(rand.Int()%30) * time.Millisecond)
 			}

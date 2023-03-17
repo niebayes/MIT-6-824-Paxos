@@ -159,6 +159,7 @@ func (kv *ShardKV) maybeApplyAdminOp(op *Op) {
 		// for the sake of safety, we choose to add the config num checking to work around the issue
 		// we mentioned above.
 
+		// TODO: wrap the first part to a func: isReconfiguringToConfig().
 		if kv.reconfigureToConfigNum == op.ReconfigureToConfigNum && kv.config.Num == kv.reconfigureToConfigNum && kv.shardDBs[op.Shard].state == MovingIn {
 			kv.installShard(op)
 		} else {
@@ -176,6 +177,14 @@ func (kv *ShardKV) maybeApplyAdminOp(op *Op) {
 			}
 		}
 
+	case "DeleteShard":
+		if kv.reconfigureToConfigNum == op.ReconfigureToConfigNum && kv.config.Num == kv.reconfigureToConfigNum && kv.shardDBs[op.Shard].state == MovingOut {
+			kv.deleteShard(op)
+
+			println("S%v-%v set shard (SN=%v) to state=%v at installing config (ACN=%v CN=%v)", kv.gid, kv.me, op.Shard, kv.shardDBs[op.Shard].state, op.ReconfigureToConfigNum, kv.config.Num)
+			println("S%v-%v starts not serving shard (SN=%v)", kv.gid, kv.me, op.Shard)
+		}
+
 	default:
 		log.Fatalf("unexpected admin op type %v", op.OpType)
 	}
@@ -184,24 +193,17 @@ func (kv *ShardKV) maybeApplyAdminOp(op *Op) {
 // FIXME: leave a bug: a client op is only applied by one server in a replica group.
 // maybe fix the bug by reverting to use reconfiguring instead of reconfigureToConfigNum.
 func (kv *ShardKV) maybeApplyClientOp(op *Op) {
-	println("S%v-%v is going to apply. K=%v key2shard=%v state=%v", kv.gid, kv.me, op.Key, key2shard(op.Key), kv.shardDBs[key2shard(op.Key)].state)
-
-	if !kv.isApplied(op) && kv.shardDBs[key2shard(op.Key)].state == Serving {
-		println("S%v-%v can apply client op (C=%v Id=%v) at N=%v", kv.gid, kv.me, op.ClerkId, op.OpId, kv.nextExecSeqNum)
-	}
-
 	if !kv.isApplied(op) && kv.isServingKey(op.Key) {
 		kv.applyClientOp(op)
 		kv.maxApplyOpIdOfClerk[op.ClerkId] = op.OpId
 
-		println("S%v-%v applied client op (C=%v Id=%v) at N=%v", kv.gid, kv.me, op.ClerkId, op.OpId, kv.nextExecSeqNum)
+		println("S%v-%v applied client op at config (CN=%v) (C=%v Id=%v) at N=%v", kv.gid, kv.me, kv.config.Num, op.ClerkId, op.OpId, kv.nextExecSeqNum)
 	} else {
 		if kv.isApplied(op) {
-			println("S%v-%v discards client op due to already applied (C=%v Id=%v) at N=%v", kv.gid, kv.me, op.ClerkId, op.OpId, kv.nextExecSeqNum)
+			println("S%v-%v discards client op due to already applied (CN=%v) (C=%v Id=%v) at N=%v", kv.gid, kv.me, kv.config.Num, op.ClerkId, op.OpId, kv.nextExecSeqNum)
 		}
 		if !kv.isServingKey(op.Key) {
-			println("S%v-%v discards client op due to not serving with state=%v (C=%v Id=%v) at N=%v", kv.gid, kv.me, kv.shardDBs[key2shard(op.Key)].state, op.ClerkId, op.OpId, kv.nextExecSeqNum)
-			println("S%v-%v K=%v key2shard=%v state=%v", kv.gid, kv.me, op.Key, key2shard(op.Key), kv.shardDBs[key2shard(op.Key)].state)
+			println("S%v-%v discards client op due to not serving with state=%v (CN=%v) (C=%v Id=%v) at N=%v", kv.gid, kv.me, kv.shardDBs[key2shard(op.Key)].state, kv.config.Num, op.ClerkId, op.OpId, kv.nextExecSeqNum)
 		}
 	}
 }

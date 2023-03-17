@@ -119,10 +119,22 @@ func (kv *ShardKV) sendShard(args *InstallShardArgs, servers []string) {
 			//
 			// note: if used the pull-based migration, the logic in the sender side would be more complicated.
 			if kv.reconfigureToConfigNum == kv.config.Num && kv.reconfigureToConfigNum == args.ReconfigureToConfigNum && kv.shardDBs[args.Shard].state == MovingOut {
-				kv.shardDBs[args.Shard].state = NotServing
+				// propose a delete shard op to sync the uninstallation of a shard.
+				//
+				// found the bug: assume the server's current config is X and it's reconfiguring to X+1.
+				// assume other servers in the same replica group are reconfiguring to X+2.
+				// assume the shard is moving out.
+				// if there's no shard delete sync, then the install config op for config X+2 might arrive when this server
+				// is reconfiguring to X+1.
+				// the server will discard the install config op since it has not done reconfiguting to X+1.
+				// now, assume the server receives a request on the moved-out shard at config X+2 but serving shard at config X+1.
+				// then this server will propose the op and apply it.
+				// but other servers which has installed the config X+2 would not apply the op.
+				// this introduces an async in client op executions.
+				// so we have to add a delete shard op and sync it among servers in a group.
 
-				println("S%v-%v set shard (SN=%v) to state=%v at installing config (ACN=%v CN=%v)", kv.gid, kv.me, args.Shard, kv.shardDBs[args.Shard].state, args.ReconfigureToConfigNum, kv.config.Num)
-				println("S%v-%v starts not serving shard (SN=%v)", kv.gid, kv.me, args.Shard)
+				op := &Op{OpType: "DeleteShard", ReconfigureToConfigNum: args.ReconfigureToConfigNum, Shard: args.Shard}
+				go kv.propose(op)
 			}
 			kv.mu.Unlock()
 
@@ -197,6 +209,8 @@ func (kv *ShardKV) InstallShard(args *InstallShardArgs, reply *InstallShardReply
 	return nil
 }
 
+// FIXME: found the bug: seems servers in a group do not install shards and configs in sync.
+// FIXME: might be a bug: new config fetching and config update in shardmaster may be broken.
 func (kv *ShardKV) installShard(op *Op) {
 	// install server state.
 	// the installation could be performed either by replacing or updating.
@@ -242,6 +256,15 @@ func (kv *ShardKV) installShard(op *Op) {
 
 	println("S%v-%v set shard (SN=%v) to state=%v at installing config (ACN=%v CN=%v)", kv.gid, kv.me, op.Shard, kv.shardDBs[op.Shard].state, kv.reconfigureToConfigNum, kv.config.Num)
 	println("S%v-%v starts serving shard (SN=%v)", kv.gid, kv.me, op.Shard)
+}
+
+func (kv *ShardKV) deleteShard(op *Op) {
+	kv.shardDBs[op.Shard] = ShardDB{
+		dB:      make(map[string]string),
+		state:   NotServing,
+		fromGid: 0,
+		toGid:   0,
+	}
 }
 
 func (kv *ShardKV) isMigrating() bool {

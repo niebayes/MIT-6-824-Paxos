@@ -16,18 +16,29 @@ func (kv *ShardKV) allocateSeqNum() int {
 	return seqNum
 }
 
+// TODO: rewrite propose with a proposer thread.
+// make a channel between the service handlers and the proposer thread.
+// rewrite executor with a channel from proposer to executor.
+// make a channel between the service handlers and the applier.
+// let the service handlers waiting on the channel from applier.
+// let the service handlers starts a thread to free the channel from applier.
+// remains a problem: how to tag a channel to uniquely identify a waiting client? use clerkid and opid is okay? any other? only clerkid?
 func (kv *ShardKV) propose(op *Op) {
 	for !kv.isdead() {
+		// TODO: check if we're still eligible to apply the op.
+		// if not, break.
+		// only good for throughput.
+
 		// allocate a sequence number for the op.
 		seqNum := kv.allocateSeqNum()
 
 		// starts proposing the op at this sequence number.
 		kv.px.Start(seqNum, *op)
-		println("S%v-%v starts proposing op (T=%v SN=%v C=%v Id=%v) at N=%v", kv.gid, kv.me, op.OpType, op.Shard, op.ClerkId, op.OpId, seqNum)
+		println("S%v-%v starts proposing op (T=%v ACN=%v SN=%v C=%v Id=%v) at N=%v", kv.gid, kv.me, op.OpType, op.Config.Num, op.Shard, op.ClerkId, op.OpId, seqNum)
 
 		// wait until the paxos instance with this sequence number is decided.
 		decidedOp := kv.waitUntilDecided(seqNum).(Op)
-		println("S%v-%v knows op (T=%v C=%v Id=%v) is decided at N=%v", kv.gid, kv.me, decidedOp.OpType, decidedOp.ClerkId, decidedOp.OpId, seqNum)
+		println("S%v-%v knows op (T=%v ACN=%v C=%v Id=%v) is decided at N=%v", kv.gid, kv.me, decidedOp.OpType, decidedOp.Config.Num, decidedOp.ClerkId, decidedOp.OpId, seqNum)
 
 		// store the decided op.
 		kv.mu.Lock()
@@ -39,7 +50,7 @@ func (kv *ShardKV) propose(op *Op) {
 		// it's our op chosen as the decided value at sequence number seqNum.
 		if isSameOp(op, &decidedOp) {
 			// end proposing.
-			println("S%v-%v ends proposing (T=%v C=%v Id=%v)", kv.gid, kv.me, decidedOp.OpType, decidedOp.ClerkId, decidedOp.OpId)
+			println("S%v-%v ends proposing (T=%v ACN=%v C=%v Id=%v)", kv.gid, kv.me, decidedOp.OpType, decidedOp.Config.Num, decidedOp.ClerkId, decidedOp.OpId)
 			kv.mu.Unlock()
 			return
 		}

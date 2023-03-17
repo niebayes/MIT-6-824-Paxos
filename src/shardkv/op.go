@@ -10,12 +10,12 @@ import (
 type Op struct {
 	ClerkId                int64
 	OpId                   int
-	OpType                 string // "Get", "Put", "Append", "InstallConfig", "InstallShard", "NoOp".
+	OpType                 string // "Get", "Put", "Append", "InstallConfig", "InstallShard", "DeleteShard", "NoOp".
 	Key                    string
 	Value                  string
 	Config                 shardmaster.Config // the config to be installed.
-	ReconfigureToConfigNum int                // the associated config num of the install shard op.
-	Shard                  int                // install shard op will install the shard data DB on the shard Shard.
+	ReconfigureToConfigNum int                // the associated config num of the InstallShard or the DeleteShard op.
+	Shard                  int                // used by InstallShard or DeleteShard to identify a shard.
 	DB                     map[string]string
 	MaxApplyOpIdOfClerk    map[int64]int // the clerk state would also be installed upon the installation of the shard data.
 }
@@ -31,7 +31,7 @@ func isSameOp(opX *Op, opY *Op) bool {
 }
 
 func (kv *ShardKV) isAdminOp(op *Op) bool {
-	return op.OpType == "InstallConfig" || op.OpType == "InstallShard"
+	return op.OpType == "InstallConfig" || op.OpType == "InstallShard" || op.OpType == "DeleteShard"
 }
 
 func (kv *ShardKV) isNoOp(op *Op) bool {
