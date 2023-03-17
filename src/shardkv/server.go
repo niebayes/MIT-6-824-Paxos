@@ -105,6 +105,14 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) error {
 	}
 	kv.mu.Unlock()
 
+	// FIXME: found a bug: the max apply op if is shared by all shards.
+	// and therefore delete shard cannot delete the portion in the max apply op id map
+	// corresponding to the deleted shard.
+	// so the service handler would still reply if the op was applied even if
+	// the shard is not serving by the server.
+	// the solutions are two:
+	// (1) do not reply OK when not serving even if applied.
+	// (2) separate max apply op id to each shard.
 	if applied, value := kv.waitUntilAppliedOrTimeout(op); applied {
 		reply.Err = OK
 		reply.Value = value

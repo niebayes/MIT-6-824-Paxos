@@ -237,7 +237,7 @@ func (kv *ShardKV) waitUntilAppliedOrTimeout(op *Op) (bool, string) {
 	for time.Since(startTime) < maxWaitTime {
 		kv.mu.Lock()
 
-		if kv.isApplied(op) {
+		if kv.isApplied(op) && kv.isServingKey(op.Key) {
 			if op.OpType == "Get" {
 				value = kv.shardDBs[key2shard(op.Key)].dB[op.Key]
 			}
