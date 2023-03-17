@@ -46,6 +46,14 @@ func (kv *ShardKV) handoffShards(configNum int) {
 	for !kv.isdead() {
 		kv.mu.Lock()
 
+		m := false
+		for shard := 0; shard < shardmaster.NShards; shard++ {
+			if kv.shardDBs[shard].state == MovingOut {
+				m = true
+				break
+			}
+		}
+
 		// each reconfiguring will incur a `handoffShards` if there're shards required to move out.
 		// put another way, this `handoffShards` is associated with a reconfiguring.
 		// therefore, this `handoffShards` keeps running only if the server is reconfiguring
@@ -57,7 +65,8 @@ func (kv *ShardKV) handoffShards(configNum int) {
 		// by the current reconfiguring.
 		// although this is okay, we choose to associate each `handoffShards` to a reconfiguring
 		// and kill it once the corresponding reconfiguring is done.
-		if kv.config.Num != configNum || kv.reconfigureToConfigNum != configNum {
+		if kv.reconfigureToConfigNum != configNum || kv.reconfigureToConfigNum != kv.config.Num {
+			println("S%v-%v stops handing off shards where moving=%v (CN=%v ACN=%v RCN=%v)", kv.gid, kv.me, m, kv.config.Num, configNum, kv.reconfigureToConfigNum)
 			kv.mu.Unlock()
 			break
 		}
@@ -74,7 +83,11 @@ func (kv *ShardKV) handoffShards(configNum int) {
 				// hence, we choose to send one shard in one message.
 
 				args := kv.makeInstallShardArgs(shard)
-				go kv.sendShard(&args, kv.shardDBs[shard].toGid)
+				servers := kv.config.Groups[kv.shardDBs[shard].toGid]
+				serversClone := make([]string, 0)
+				serversClone = append(serversClone, servers...)
+
+				go kv.sendShard(&args, serversClone)
 
 				println("S%v-%v sends shard (SN=%v) to G%v", kv.gid, kv.me, shard, kv.shardDBs[shard].toGid)
 			}
@@ -97,7 +110,8 @@ func (kv *ShardKV) checkMigrationState(configNum int) {
 		kv.mu.Lock()
 
 		// see the reasoning in `handoffShards`.
-		if kv.config.Num != configNum || kv.reconfigureToConfigNum != configNum {
+		if kv.reconfigureToConfigNum != configNum || kv.reconfigureToConfigNum != kv.config.Num {
+			println("S%v-%v stops handing off shards where migrating=%v (CN=%v ACN=%v RCN=%v)", kv.gid, kv.me, kv.isMigrating(), kv.config.Num, configNum, kv.reconfigureToConfigNum)
 			kv.mu.Unlock()
 			break
 		}
@@ -115,9 +129,8 @@ func (kv *ShardKV) checkMigrationState(configNum int) {
 	}
 }
 
-func (kv *ShardKV) sendShard(args *InstallShardArgs, gid int64) {
+func (kv *ShardKV) sendShard(args *InstallShardArgs, servers []string) {
 	// send the shard to the receiver replica group.
-	servers := kv.config.Groups[gid]
 	for _, server := range servers {
 		reply := &InstallShardReply{}
 		ok := call(server, "ShardKV.InstallShard", args, reply)
@@ -139,7 +152,9 @@ func (kv *ShardKV) sendShard(args *InstallShardArgs, gid int64) {
 			// and starts not serving the moved-out shards.
 			//
 			// note: if used the pull-based migration, the logic in the sender side would be more complicated.
-			kv.shardDBs[args.Shard].state = NotServing
+			if kv.reconfigureToConfigNum == kv.config.Num && kv.reconfigureToConfigNum == args.ReconfigureToConfigNum && kv.shardDBs[args.Shard].state == MovingOut {
+				kv.shardDBs[args.Shard].state = NotServing
+			}
 			kv.mu.Unlock()
 
 			println("S%v-%v starts not serving shard (SN=%v)", kv.gid, kv.me, args.Shard)

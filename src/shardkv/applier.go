@@ -184,6 +184,8 @@ func (kv *ShardKV) maybeApplyAdminOp(op *Op) {
 // FIXME: leave a bug: a client op is only applied by one server in a replica group.
 // maybe fix the bug by reverting to use reconfiguring instead of reconfigureToConfigNum.
 func (kv *ShardKV) maybeApplyClientOp(op *Op) {
+	println("S%v-%v is going to apply. K=%v key2shard=%v state=%v", kv.gid, kv.me, op.Key, key2shard(op.Key), kv.shardDBs[key2shard(op.Key)].state)
+
 	if !kv.isApplied(op) && kv.isServingKey(op.Key) {
 		kv.applyClientOp(op)
 		kv.maxApplyOpIdOfClerk[op.ClerkId] = op.OpId
@@ -195,6 +197,7 @@ func (kv *ShardKV) maybeApplyClientOp(op *Op) {
 		}
 		if !kv.isServingKey(op.Key) {
 			println("S%v-%v discards client op due to not serving with state=%v (C=%v Id=%v) at N=%v", kv.gid, kv.me, kv.shardDBs[op.Shard].state, op.ClerkId, op.OpId, kv.nextExecSeqNum)
+			println("S%v-%v K=%v key2shard=%v state=%v", kv.gid, kv.me, op.Key, key2shard(op.Key), kv.shardDBs[key2shard(op.Key)].state)
 		}
 	}
 }

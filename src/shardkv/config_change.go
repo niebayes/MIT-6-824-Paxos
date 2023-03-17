@@ -16,7 +16,12 @@ func (kv *ShardKV) tick() {
 	// say, there's a final config which assigns all shards to B.
 	// since B is reconfigruing, any new config cannot be learned by B
 	// and hence all client requests would be rejected and the system goes in a live lock.
-	nextConfig := kv.sm.Query(kv.config.Num + 1)
+
+	kv.mu.Lock()
+	nextConfigNum := kv.config.Num + 1
+	kv.mu.Unlock()
+
+	nextConfig := kv.sm.Query(nextConfigNum)
 
 	kv.mu.Lock()
 

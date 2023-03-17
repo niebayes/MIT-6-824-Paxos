@@ -22,14 +22,14 @@ const handoffShardsInterval = 200 * time.Millisecond
 const checkMigrationStateInterval = 200 * time.Millisecond
 const proposeNoOpInterval = 250 * time.Millisecond
 
-type ShardState int
+type ShardState string
 
 // warning: remember to place the desired default value of the enum at the beginning so that the init value is the desired default value.
 const (
-	NotServing ShardState = iota // the server is not serving the shard.
-	Serving                      // the server is serving the shard.
-	MovingIn                     // the server is waiting for the shard data to be moved in.
-	MovingOut                    // the server is moving out the shard data.
+	NotServing = "NotServing" // the server is not serving the shard.
+	Serving    = "Serving"    // the server is serving the shard.
+	MovingIn   = "MovingIn"   // the server is waiting for the shard data to be moved in.
+	MovingOut  = "MovingOut"  // the server is moving out the shard data.
 )
 
 type ShardDB struct {
@@ -90,9 +90,9 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) error {
 	// it's okay if we do not reject the request so long as we guarantee that
 	// an op is applied only if it's not applied before.
 	if !kv.isServingKey(args.Key) {
+		println("S%v-%v rejects Get due to state=%v (C=%v Id=%v)", kv.gid, kv.me, kv.shardDBs[key2shard(args.Key)].state, args.ClerkId, args.OpId)
 		kv.mu.Unlock()
 		reply.Err = ErrWrongGroup
-		println("S%v-%v rejects Get (C=%v Id=%v)", kv.gid, kv.me, args.ClerkId, args.OpId)
 		return nil
 	}
 
@@ -135,9 +135,9 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error {
 	// reply ErrWrongGroup if not serving the given key.
 	// see reasoning in `Get`.
 	if !kv.isServingKey(args.Key) {
+		println("S%v-%v rejects PutAppend due to state=%v (C=%v Id=%v)", kv.gid, kv.me, kv.shardDBs[key2shard(args.Key)].state, args.ClerkId, args.OpId)
 		kv.mu.Unlock()
 		reply.Err = ErrWrongGroup
-		println("S%v-%v rejects PutAppend (C=%v Id=%v)", kv.gid, kv.me, args.ClerkId, args.OpId)
 		return nil
 	}
 
