@@ -3,7 +3,6 @@ package shardkv
 import "6.824/src/shardmaster"
 import "net/rpc"
 import "time"
-import "fmt"
 import "crypto/rand"
 import "math/big"
 
@@ -155,10 +154,5 @@ func call(srv string, rpcname string,
 	defer c.Close()
 
 	err := c.Call(rpcname, args, reply)
-	if err == nil {
-		return true
-	}
-
-	fmt.Println(err)
-	return false
+	return err == nil
 }
