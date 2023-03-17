@@ -35,7 +35,6 @@ func (ck *Clerk) allocateOpId() int {
 	return opId
 }
 
-// which shard is a key in?
 func key2shard(key string) int {
 	shard := 0
 	if len(key) > 0 {
@@ -45,9 +44,6 @@ func key2shard(key string) int {
 	return shard
 }
 
-// fetch the current value for a key.
-// returns "" if the key does not exist.
-// keeps trying forever in the face of all other errors.
 func (ck *Clerk) Get(key string) string {
 	args := &GetArgs{ClerkId: ck.clerkId, OpId: ck.allocateOpId(), Key: key}
 
@@ -57,7 +53,6 @@ func (ck *Clerk) Get(key string) string {
 		servers, ok := ck.config.Groups[gid]
 
 		if ok {
-			// try each server in the shard's replication group.
 			for _, srv := range servers {
 				var reply GetReply
 				ok := call(srv, "ShardKV.Get", args, &reply)
@@ -72,23 +67,10 @@ func (ck *Clerk) Get(key string) string {
 
 		time.Sleep(100 * time.Millisecond)
 
-		// ask the shardmaster for the latest configuration.
-		//
-		// FIXME: it's possible that the config change is too often so that
-		// the server's config is way too lag-behind than the client's config.
-		// since the config change and shard migration may be time-consuming,
-		// the client might have to wait a long time to wait the server changes
-		// to a config wherein the server is eligible to serve the key.
-		//
-		// if a 30s timeout is set on the tests, there's 1/500 fail rate.
-		//
-		// hence, instead of always quering the latest config, we choose to
-		// query the next config when notified ErrWrongGroup.
 		ck.config = ck.sm.Query(ck.config.Num + 1)
 	}
 }
 
-// send a Put or Append request.
 func (ck *Clerk) PutAppend(key string, value string, op string) {
 	args := &PutAppendArgs{ClerkId: ck.clerkId, OpId: ck.allocateOpId(), OpType: op, Key: key, Value: value}
 
@@ -98,7 +80,6 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 		servers, ok := ck.config.Groups[gid]
 
 		if ok {
-			// try each server in the shard's replication group.
 			for _, srv := range servers {
 				var reply PutAppendReply
 				ok := call(srv, "ShardKV.PutAppend", args, &reply)
@@ -113,7 +94,6 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 
 		time.Sleep(100 * time.Millisecond)
 
-		// ask the shardmaster for the latest configuration.
 		ck.config = ck.sm.Query(ck.config.Num + 1)
 	}
 }
@@ -126,21 +106,6 @@ func (ck *Clerk) Append(key string, value string) {
 	ck.PutAppend(key, value, "Append")
 }
 
-// call() sends an RPC to the rpcname handler on server srv
-// with arguments args, waits for the reply, and leaves the
-// reply in reply. the reply argument should be a pointer
-// to a reply structure.
-//
-// the return value is true if the server responded, and false
-// if call() was not able to contact the server. in particular,
-// the reply's contents are only valid if call() returned true.
-//
-// you should assume that call() will return an
-// error after a while if the server is dead.
-// don't provide your own time-out mechanism.
-//
-// please use call() to send all RPCs, in client.go and server.go.
-// please don't change this function.
 func call(srv string, rpcname string,
 	args interface{}, reply interface{}) bool {
 	c, errx := rpc.Dial("unix", srv)
