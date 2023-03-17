@@ -84,7 +84,6 @@ func (px *Paxos) propose(seqNum int, value interface{}) {
 		// bookeeping to workaround races.
 		propNum := ins.propNum
 		propValue := ins.propValue
-
 		px.mu.Unlock()
 
 		printf("S%v starts proposing (N=%v P=%v V=%v)", px.me, seqNum, propNum, propValue)

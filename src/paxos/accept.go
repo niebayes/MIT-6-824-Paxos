@@ -19,8 +19,8 @@ func (px *Paxos) majorityAccepted(ins *Instance) bool {
 	return numAccepted*2 > len(px.peers)
 }
 
-func (px *Paxos) sendAccept(peer int, ins *Instance, wg *sync.WaitGroup) {
-	args := &AcceptArgs{Me: px.me, SeqNum: ins.seqNum, PropNum: ins.propNum, Value: ins.propValue}
+func (px *Paxos) sendAccept(peer, seqNum, propNum int, propValue interface{}, wg *sync.WaitGroup) {
+	args := &AcceptArgs{Me: px.me, SeqNum: seqNum, PropNum: propNum, Value: propValue}
 	reply := &AcceptReply{}
 	if call(px.peers[peer], "Paxos.Accept", args, reply) {
 		px.handleAcceptReply(args, reply)
@@ -32,16 +32,22 @@ func (px *Paxos) sendAccept(peer int, ins *Instance, wg *sync.WaitGroup) {
 }
 
 func (px *Paxos) broadcastAccepts(ins *Instance, done chan bool) {
+	px.mu.Lock()
+	seqNum := ins.seqNum
+	propNum := ins.propNum
+	propValue := ins.propValue
+	px.mu.Unlock()
+
 	wg := &sync.WaitGroup{}
 	wg.Add(len(px.peers))
 
 	for i := range px.peers {
 		if i != px.me {
-			go px.sendAccept(i, ins, wg)
+			go px.sendAccept(i, seqNum, propNum, propValue, wg)
 		} else {
 			// make a local call if the receiver is myself.
 			go func() {
-				args := &AcceptArgs{Me: px.me, SeqNum: ins.seqNum, PropNum: ins.propNum, Value: ins.propValue}
+				args := &AcceptArgs{Me: px.me, SeqNum: seqNum, PropNum: propNum, Value: propValue}
 				reply := &AcceptReply{}
 				px.Accept(args, reply)
 				px.handleAcceptReply(args, reply)
