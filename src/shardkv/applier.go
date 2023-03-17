@@ -159,8 +159,9 @@ func (kv *ShardKV) maybeApplyAdminOp(op *Op) {
 		// for the sake of safety, we choose to add the config num checking to work around the issue
 		// we mentioned above.
 
-		// TODO: wrap the first part to a func: isReconfiguringToConfig().
-		if kv.reconfigureToConfigNum == op.ReconfigureToConfigNum && kv.config.Num == kv.reconfigureToConfigNum && kv.shardDBs[op.Shard].state == MovingIn {
+		// TODO: update doc and comments.
+
+		if kv.isEligibleToUpdateShard(op.ReconfigureToConfigNum) && kv.shardDBs[op.Shard].state == MovingIn {
 			kv.installShard(op)
 		} else {
 
@@ -178,7 +179,7 @@ func (kv *ShardKV) maybeApplyAdminOp(op *Op) {
 		}
 
 	case "DeleteShard":
-		if kv.reconfigureToConfigNum == op.ReconfigureToConfigNum && kv.config.Num == kv.reconfigureToConfigNum && kv.shardDBs[op.Shard].state == MovingOut {
+		if kv.isEligibleToUpdateShard(op.ReconfigureToConfigNum) && kv.shardDBs[op.Shard].state == MovingOut {
 			kv.deleteShard(op)
 
 			println("S%v-%v set shard (SN=%v) to state=%v at installing config (ACN=%v CN=%v)", kv.gid, kv.me, op.Shard, kv.shardDBs[op.Shard].state, op.ReconfigureToConfigNum, kv.config.Num)
@@ -228,6 +229,38 @@ func (kv *ShardKV) applyClientOp(op *Op) {
 	default:
 		log.Fatalf("unexpected client op type %v", op.OpType)
 	}
+}
+
+func (kv *ShardKV) isEligibleToApply(op *Op) bool {
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+
+	eligible := false
+
+	if kv.isNoOp(op) {
+		eligible = true
+
+	} else if kv.isAdminOp(op) {
+		switch op.OpType {
+		case "InstallConfig":
+			eligible = (kv.reconfigureToConfigNum == op.Config.Num || op.Config.Num == kv.config.Num+1) && !kv.isMigrating()
+
+		case "InstallShard":
+			eligible = kv.isEligibleToUpdateShard(op.ReconfigureToConfigNum) && kv.shardDBs[op.Shard].state == MovingIn
+
+		case "DeleteShard":
+			eligible = kv.isEligibleToUpdateShard(op.ReconfigureToConfigNum) && kv.shardDBs[op.Shard].state == MovingOut
+
+		default:
+			log.Fatalf("unexpected admin op type %v", op.OpType)
+		}
+
+	} else {
+		// client op.
+		eligible = !kv.isApplied(op) && kv.isServingKey(op.Key)
+	}
+
+	return eligible
 }
 
 func (kv *ShardKV) waitUntilAppliedOrTimeout(op *Op) (bool, string) {

@@ -3,10 +3,6 @@ package shardkv
 import "time"
 import "6.824/src/paxos"
 
-//
-// this file contains codes for interacting with paxos.
-//
-
 func (kv *ShardKV) allocateSeqNum() int {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
@@ -16,18 +12,14 @@ func (kv *ShardKV) allocateSeqNum() int {
 	return seqNum
 }
 
-// TODO: rewrite propose with a proposer thread.
-// make a channel between the service handlers and the proposer thread.
-// rewrite executor with a channel from proposer to executor.
-// make a channel between the service handlers and the applier.
-// let the service handlers waiting on the channel from applier.
-// let the service handlers starts a thread to free the channel from applier.
-// remains a problem: how to tag a channel to uniquely identify a waiting client? use clerkid and opid is okay? any other? only clerkid?
 func (kv *ShardKV) propose(op *Op) {
 	for !kv.isdead() {
-		// TODO: check if we're still eligible to apply the op.
-		// if not, break.
-		// only good for throughput.
+		// during the gap the op is sent to the proposer and the op is actually proposed,
+		// the server's state might change and it's no longer eligible to apply the op.
+		// we choose to not to propose the op if found not eligible to apply the op.
+		if !kv.isEligibleToApply(op) {
+			break
+		}
 
 		// allocate a sequence number for the op.
 		seqNum := kv.allocateSeqNum()

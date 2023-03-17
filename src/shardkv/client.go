@@ -76,7 +76,18 @@ func (ck *Clerk) Get(key string) string {
 		time.Sleep(100 * time.Millisecond)
 
 		// ask the shardmaster for the latest configuration.
-		ck.config = ck.sm.Query(-1)
+		//
+		// FIXME: it's possible that the config change is too often so that
+		// the server's config is way too lag-behind than the client's config.
+		// since the config change and shard migration may be time-consuming,
+		// the client might have to wait a long time to wait the server changes
+		// to a config wherein the server is eligible to serve the key.
+		//
+		// if a 30s timeout is set on the tests, there's 1/500 fail rate.
+		//
+		// hence, instead of always quering the latest config, we choose to
+		// query the next config when notified ErrWrongGroup.
+		ck.config = ck.sm.Query(ck.config.Num + 1)
 	}
 }
 
@@ -108,7 +119,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 		time.Sleep(100 * time.Millisecond)
 
 		// ask the shardmaster for the latest configuration.
-		ck.config = ck.sm.Query(-1)
+		ck.config = ck.sm.Query(ck.config.Num + 1)
 	}
 }
 

@@ -118,7 +118,7 @@ func (kv *ShardKV) sendShard(args *InstallShardArgs, servers []string) {
 			// and starts not serving the moved-out shards.
 			//
 			// note: if used the pull-based migration, the logic in the sender side would be more complicated.
-			if kv.reconfigureToConfigNum == kv.config.Num && kv.reconfigureToConfigNum == args.ReconfigureToConfigNum && kv.shardDBs[args.Shard].state == MovingOut {
+			if kv.isEligibleToUpdateShard(args.ReconfigureToConfigNum) && kv.shardDBs[args.Shard].state == MovingOut {
 				// propose a delete shard op to sync the uninstallation of a shard.
 				//
 				// found the bug: assume the server's current config is X and it's reconfiguring to X+1.
@@ -170,7 +170,7 @@ func (kv *ShardKV) InstallShard(args *InstallShardArgs, reply *InstallShardReply
 	// if we do not reject the request, the stale shard data may get installed.
 	// although we could delay the staleness checking to the time the op gets executed,
 	// it'd be better to filter out such requests upon receiving the requests.
-	if args.ReconfigureToConfigNum == kv.reconfigureToConfigNum && kv.config.Num == kv.reconfigureToConfigNum && kv.shardDBs[args.Shard].state == MovingIn {
+	if kv.isEligibleToUpdateShard(args.ReconfigureToConfigNum) && kv.shardDBs[args.Shard].state == MovingIn {
 		// note, there's a gap between the proposing of the op and the execution of the op.
 		// we could filter the dup op so that the bandwidth pressure on the paxos level could be reduced.
 		// however, this would require us to assign a unique server id and op id for each admin op.
@@ -274,4 +274,10 @@ func (kv *ShardKV) isMigrating() bool {
 		}
 	}
 	return false
+}
+
+func (kv *ShardKV) isEligibleToUpdateShard(reconfigureToConfigNum int) bool {
+	// these two checkings ensure that the server must have been installed the config with the config num `reconfigureToConfigNum`
+	// and must be waiting to install or delete shards.
+	return kv.reconfigureToConfigNum == reconfigureToConfigNum && kv.reconfigureToConfigNum == kv.config.Num
 }
