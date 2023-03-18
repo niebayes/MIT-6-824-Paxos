@@ -69,7 +69,7 @@ type ShardKV struct {
 	nextExecSeqNum int
 	// the maximum op id among all applied ops of each clerk.
 	// any op with op id less than the max id won't be applied, so that the at-most-once semantics is guaranteed.
-	maxApplyOpIdOfClerk map[int64]int
+	maxAppliedOpIdOfClerk map[int64]int
 	// all decided ops this server knows of.
 	// key: sequence number, value: the decided op.
 	decidedOps map[int]Op
@@ -80,14 +80,6 @@ type ShardKV struct {
 func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) error {
 	kv.mu.Lock()
 
-	// reply ErrWrongGroup if not serving the given key.
-	// we assume the config change is not a frequent operation and hence
-	// if the time we receive the request the server is not serving the
-	// given key, there has little chance that this server will serve
-	// the given key the time the op constructed from the request is being
-	// executed.
-	// it's okay if we do not reject the request so long as we guarantee that
-	// an op is applied only if it's not applied before.
 	if !kv.isServingKey(args.Key) {
 		println("S%v-%v rejects Get due to state=%v (C=%v Id=%v)", kv.gid, kv.me, kv.shardDBs[key2shard(args.Key)].state, args.ClerkId, args.OpId)
 		kv.mu.Unlock()
@@ -97,7 +89,6 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) error {
 
 	println("S%v-%v accepts Get (C=%v Id=%v)", kv.gid, kv.me, args.ClerkId, args.OpId)
 
-	// wrap the request into an op.
 	op := &Op{ClerkId: args.ClerkId, OpId: args.OpId, OpType: "Get", Key: args.Key}
 
 	if !kv.isApplied(op) {
@@ -105,14 +96,17 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) error {
 	}
 	kv.mu.Unlock()
 
-	// warning: the max apply op if is shared by all shards.
+	// warning: the max apply op id map is shared by all shards.
 	// and therefore delete shard cannot delete the portion in the max apply op id map
 	// corresponding to the deleted shard.
 	// so the service handler would still reply if the op was applied even if
 	// the shard is not serving by the server.
-	// the solutions are two:
+	//
+	// there are two solutions:
 	// (1) do not reply OK when not serving even if applied.
-	// (2) separate max apply op id to each shard.
+	// (2) separate max apply op id to each shard and delete it on demand.
+	// we choose to implement the first solution.
+
 	if applied, value := kv.waitUntilAppliedOrTimeout(op); applied {
 		reply.Err = OK
 		reply.Value = value
@@ -121,15 +115,16 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) error {
 
 	} else {
 		// it's not necessary to differentiate between ErrNotApplied and ErrWrongGroup here.
-		// if the op is not executed because the server is not serving the shard the time the server is
+		// if the op is not applied because the server is not serving the shard the time the server is
 		// executing the op, the client may resend the same request to this server because the reply is
 		// ErrNotApplied.
 		// however, this time, the request would be rejected since the server is not serving the shard
 		// and ErrWrongGroup is replied.
-		// the client would then query the latest config from the shardmaster and send the request to
-		// another replica group who is serving the shard.
+		// the client would then query a new config from the shardmaster and send the request to
+		// another replica group who is possibly serving the shard.
 		//
 		// note, the same reasoning applies to all places where ErrNotApplied is returned.
+
 		reply.Err = ErrNotApplied
 	}
 
@@ -139,8 +134,6 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) error {
 func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error {
 	kv.mu.Lock()
 
-	// reply ErrWrongGroup if not serving the given key.
-	// see reasoning in `Get`.
 	if !kv.isServingKey(args.Key) {
 		println("S%v-%v rejects PutAppend due to state=%v (C=%v Id=%v)", kv.gid, kv.me, kv.shardDBs[key2shard(args.Key)].state, args.ClerkId, args.OpId)
 		kv.mu.Unlock()
@@ -150,7 +143,6 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error {
 
 	println("S%v-%v accepts PutAppend (C=%v Id=%v)", kv.gid, kv.me, args.ClerkId, args.OpId)
 
-	// wrap the request into an op.
 	op := &Op{ClerkId: args.ClerkId, OpId: args.OpId, OpType: args.OpType, Key: args.Key, Value: args.Value}
 
 	if !kv.isApplied(op) {
@@ -222,7 +214,7 @@ func StartServer(gid int64, shardmasters []string,
 
 	kv.nextAllocSeqNum = 0
 	kv.nextExecSeqNum = 0
-	kv.maxApplyOpIdOfClerk = make(map[int64]int)
+	kv.maxAppliedOpIdOfClerk = make(map[int64]int)
 	kv.decidedOps = make(map[int]Op)
 	kv.hasNewDecidedOp = *sync.NewCond(&kv.mu)
 

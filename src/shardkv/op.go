@@ -17,7 +17,7 @@ type Op struct {
 	ReconfigureToConfigNum int                // the associated config num of the InstallShard or the DeleteShard op.
 	Shard                  int                // used by InstallShard or DeleteShard to identify a shard.
 	DB                     map[string]string
-	MaxApplyOpIdOfClerk    map[int64]int // the clerk state would also be installed upon the installation of the shard data.
+	MaxAppliedOpIdOfClerk  map[int64]int // the clerk state would also be installed upon the installation of the shard data.
 }
 
 func isSameOp(opX *Op, opY *Op) bool {

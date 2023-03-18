@@ -10,7 +10,7 @@ type Clerk struct {
 	sm       *shardmaster.Clerk // used to contact with the shardmaster service.
 	config   shardmaster.Config // clerk's current config.
 	clerkId  int64              // the unique id of this clerk.
-	nextOpId int                // the next op id to allocate.
+	nextOpId int                // the next op id to allocate for an op.
 }
 
 func MakeClerk(shardmasters []string) *Clerk {
@@ -78,14 +78,19 @@ func (ck *Clerk) Get(key string) string {
 		//
 		// note: it's possible that the config change is too often so that
 		// the server's config is way too lag-behind than the client's config.
+		//
 		// since the config change and shard migration may be time-consuming,
-		// the client might have to wait a long time to wait the server changes
+		// and the servers must do config change from X+1 to X+2 and to X+... in order without no holes.
+		// the client might have to spend a long time to wait the server changes
 		// to a config wherein the server is eligible to serve the key.
 		//
-		// if a 30s timeout is set on the tests, there's 1/500 fail rate.
+		// such a config does not have to be the latest config, but it needs to be a config
+		// wherein the group serving the request key is the same as the group serving the request key
+		// in the client's config.
 		//
 		// hence, instead of always quering the latest config, we choose to
 		// query the next config when notified ErrWrongGroup.
+
 		ck.config = ck.sm.Query(ck.config.Num + 1)
 	}
 }

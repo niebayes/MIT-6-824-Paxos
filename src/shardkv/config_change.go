@@ -2,8 +2,6 @@ package shardkv
 
 import "6.824/src/shardmaster"
 
-// ask the shardmaster if there's a new configuration;
-// if so, re-configure.
 func (kv *ShardKV) tick() {
 	// the config change has to be contiguous.
 	// for example, there're three groups A, B, C, and three contiguous configs X, Y, Z and a shard S.
@@ -31,7 +29,6 @@ func (kv *ShardKV) tick() {
 	if kv.reconfigureToConfigNum == -1 && nextConfig.Num == kv.config.Num+1 {
 		kv.reconfigureToConfigNum = nextConfig.Num
 
-		// propose an install config op.
 		op := &Op{OpType: "InstallConfig", Config: nextConfig}
 		go kv.propose(op)
 
@@ -42,7 +39,6 @@ func (kv *ShardKV) tick() {
 }
 
 func (kv *ShardKV) installConfig(nextConfig shardmaster.Config) {
-	// check if there's any change on the served shards.
 	hasShardsToHandOff := false
 	hasShardsToTakeOver := false
 
@@ -53,8 +49,6 @@ func (kv *ShardKV) installConfig(nextConfig shardmaster.Config) {
 		if currGid == 0 && newGid == kv.gid {
 			// nothing to move in if the from group is the invalid group 0.
 			kv.shardDBs[shard].state = Serving
-
-			println("S%v-%v set shard (SN=%v) to state=%v at installing config (ACN=%v CN=%v)", kv.gid, kv.me, shard, kv.shardDBs[shard].state, nextConfig.Num, kv.config.Num)
 			continue
 		}
 
@@ -62,8 +56,6 @@ func (kv *ShardKV) installConfig(nextConfig shardmaster.Config) {
 		if newGid == 0 {
 			// noting to move out if the to group is the invalid group 0.
 			kv.shardDBs[shard].state = NotServing
-
-			println("S%v-%v set shard (SN=%v) to state=%v at installing config (ACN=%v CN=%v)", kv.gid, kv.me, shard, kv.shardDBs[shard].state, nextConfig.Num, kv.config.Num)
 			continue
 		}
 
@@ -72,16 +64,12 @@ func (kv *ShardKV) installConfig(nextConfig shardmaster.Config) {
 			kv.shardDBs[shard].state = MovingOut
 			kv.shardDBs[shard].toGid = newGid
 			hasShardsToHandOff = true
-
-			println("S%v-%v set shard (SN=%v) to state=%v at installing config (ACN=%v CN=%v)", kv.gid, kv.me, shard, kv.shardDBs[shard].state, nextConfig.Num, kv.config.Num)
 		}
 		if currGid != kv.gid && newGid == kv.gid {
 			// move this shard from the group with gid currGid to this group.
 			kv.shardDBs[shard].state = MovingIn
 			kv.shardDBs[shard].fromGid = currGid
 			hasShardsToTakeOver = true
-
-			println("S%v-%v set shard (SN=%v) to state=%v at installing config (ACN=%v CN=%v)", kv.gid, kv.me, shard, kv.shardDBs[shard].state, nextConfig.Num, kv.config.Num)
 		}
 	}
 
