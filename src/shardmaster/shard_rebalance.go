@@ -31,8 +31,9 @@ func rebalanceShards(config *Config, isJoin bool, movedGid int64) {
 	}
 
 	// sort the array by the number of shards in descending order.
-	// note: a stable sort is not needed, since only the #shards matters.
-	sort.Slice(gidAndShardsArray, func(i, j int) bool { return len(gidAndShardsArray[i].shards) > len(gidAndShardsArray[j].shards) })
+	// warning: a stable sort is necessary since shard rebalancing must be deterministic so that
+	// the rebalancing results are consistent though out all shardmaster servers.
+	sort.SliceStable(gidAndShardsArray, func(i, j int) bool { return len(gidAndShardsArray[i].shards) > len(gidAndShardsArray[j].shards) })
 
 	// compute the expected number of shards of each group after the rebalancing.
 	numGroups := len(config.Groups)   // the Groups must have been added or removed the group.

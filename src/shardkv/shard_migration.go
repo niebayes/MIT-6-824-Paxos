@@ -105,33 +105,6 @@ func (kv *ShardKV) sendShard(args *InstallShardArgs, servers []string) {
 
 			if kv.isEligibleToUpdateShard(args.ReconfigureToConfigNum) && kv.shardDBs[args.Shard].state == MovingOut {
 				// propose a delete shard op to sync the uninstallation of a shard.
-				//
-				// why this op is necessary?
-				//
-				// assume:
-				// the server's current config is X and it's reconfiguring to X+1.
-				// other servers in the same replica group are reconfiguring to X+2.
-				// this is possible since only a majority of servers is necessary to push server state and paxos state towards.
-				// one of the other servers has proposed a install config op for config X+2.
-				//
-				// if there's no shard delete sync, then the install config op for config X+2 might arrive when this server
-				// is reconfiguring to X+1.
-				// the server will discard the install config op since it has not done reconfiguting to X+1.
-				//
-				// further assume:
-				// the server completes the reconfiguring to X+1.
-				// in config X+1, the server is serving a shard.
-				// in config X+2, the server would not serve the shard.
-				//
-				// further assume:
-				// a client request arrives at this server.
-				// the client request corresponds to the shard served by the server in config X+1.
-				//
-				// then this server will propose the op and apply it.
-				// but other servers which are reconfiguring to the config X+2 would not apply the op.
-				// this introduces an async in client op executions.
-				// so we have to add a delete shard op and sync it among servers in a group.
-
 				op := &Op{OpType: "DeleteShard", ReconfigureToConfigNum: args.ReconfigureToConfigNum, Shard: args.Shard}
 				go kv.propose(op)
 			}
