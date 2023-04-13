@@ -39,7 +39,7 @@ type KVPaxos struct {
 	nextExecSeqNum int
 	// the maximum op id among all applied ops of each clerk.
 	// any op with op id less than the max id won't be applied, so that the at-most-once semantics is guaranteed.
-	maxApplyOpIdOfClerk map[int64]int
+	maxAppliedOpIdOfClerk map[int64]int
 	// all decided ops this server knows of.
 	// key: sequence number, value: the decided op.
 	decidedOps map[int]Op
@@ -139,7 +139,7 @@ func StartServer(servers []string, me int) *KVPaxos {
 
 	kv.nextAllocSeqNum = 0
 	kv.nextExecSeqNum = 0
-	kv.maxApplyOpIdOfClerk = make(map[int64]int)
+	kv.maxAppliedOpIdOfClerk = make(map[int64]int)
 	kv.decidedOps = make(map[int]Op)
 	kv.hasNewDecidedOp = *sync.NewCond(&kv.mu)
 

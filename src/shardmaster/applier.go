@@ -48,7 +48,7 @@ func (sm *ShardMaster) executor() {
 func (sm *ShardMaster) maybeApplyClientOp(op *Op) {
 	if !sm.isApplied(op) {
 		sm.applyClientOp(op)
-		sm.maxApplyOpIdOfClerk[op.ClerkId] = op.OpId
+		sm.maxAppliedOpIdOfClerk[op.ClerkId] = op.OpId
 
 		println("S%v applied client op (C=%v Id=%v) at N=%v", sm.me, op.ClerkId, op.OpId, sm.nextExecSeqNum)
 		// println("ShardMaster Config (CN=%v)", sm.configs[len(sm.configs)-1].Num)
@@ -166,6 +166,6 @@ func (sm *ShardMaster) waitUntilAppliedOrTimeout(op *Op) (bool, Config) {
 }
 
 func (sm *ShardMaster) isApplied(op *Op) bool {
-	maxApplyOpId, exist := sm.maxApplyOpIdOfClerk[op.ClerkId]
+	maxApplyOpId, exist := sm.maxAppliedOpIdOfClerk[op.ClerkId]
 	return exist && maxApplyOpId >= op.OpId
 }

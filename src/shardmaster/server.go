@@ -41,7 +41,7 @@ type ShardMaster struct {
 	nextExecSeqNum int
 	// the maximum op id among all applied ops of each clerk.
 	// any op with op id less than the max id won't be applied, so that the at-most-once semantics is guaranteed.
-	maxApplyOpIdOfClerk map[int64]int
+	maxAppliedOpIdOfClerk map[int64]int
 	// all decided ops this server knows of.
 	// key: sequence number, value: the decided op.
 	decidedOps map[int]Op
@@ -201,7 +201,7 @@ func StartServer(servers []string, me int) *ShardMaster {
 
 	sm.nextAllocSeqNum = 0
 	sm.nextExecSeqNum = 0
-	sm.maxApplyOpIdOfClerk = make(map[int64]int)
+	sm.maxAppliedOpIdOfClerk = make(map[int64]int)
 	sm.decidedOps = make(map[int]Op)
 	sm.hasNewDecidedOp = *sync.NewCond(&sm.mu)
 

@@ -48,7 +48,7 @@ func (kv *KVPaxos) executor() {
 func (kv *KVPaxos) maybeApplyClientOp(op *Op) {
 	if !kv.isApplied(op) {
 		kv.applyClientOp(op)
-		kv.maxApplyOpIdOfClerk[op.ClerkId] = op.OpId
+		kv.maxAppliedOpIdOfClerk[op.ClerkId] = op.OpId
 
 		println("S%v applied client op (C=%v Id=%v) at N=%v", kv.me, op.ClerkId, op.OpId, kv.nextExecSeqNum)
 	}
@@ -91,6 +91,6 @@ func (kv *KVPaxos) waitUntilAppliedOrTimeout(op *Op) (bool, string) {
 }
 
 func (kv *KVPaxos) isApplied(op *Op) bool {
-	maxApplyOpId, exist := kv.maxApplyOpIdOfClerk[op.ClerkId]
+	maxApplyOpId, exist := kv.maxAppliedOpIdOfClerk[op.ClerkId]
 	return exist && maxApplyOpId >= op.OpId
 }
