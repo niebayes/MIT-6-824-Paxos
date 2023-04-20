@@ -42,6 +42,15 @@ config change 涉及到 curr config 和 new config 两个 configs。对于每个
 
 如果你实现了 dup checking and filtering，为了测试程序的正确性，那么需要在 `TestUnreliable` 测试中 uncomment `sma[i].setunreliable(true)` 这一行，如此才会开启 network 的 unreliable 特性，才能测试 dup checking and filtering 功能的正确性。
 
+## 关于 consistent hashing
+sharding 是一个伸展性比较大的概念。狭义上，它可以指逻辑上的对数据分片。广义上，它可以指先将数据分片，再将分片后的数据分发到不同的节点。这里的数据分发就涉及到 load balance。
+
+consistent hashing 是一种静态的 load balance 算法，它的输入是 key，输出是应该存储这个 key 的 node。这里的 key 既可以指一般意义上的 key，也可以指某个数据片。这里静态的意思是：如果 node 的数量不变，那么对于一个给定的 key，它所对应的 node 是不变的。
+
+在 lab 4 shard-kv 中，我们做的是广义上的 sharding，即不仅分片，还需要合理地分发数据，以做 load balance。因为 lab4 提供了 key2shard 这个分片函数，所以我们只需要完成 load balance 这一部分。此时，要么自己实现一种 load balance 算法，要么使用 consistent hashing。
+
+如果我们不提供分片函数，那么可以直接将普通的 key 作为 consistent hashing 的输入，由它来决定这个 key 应该放在哪个 replica group。这样的做法虽然跳过了分片而直接分发数据，但实际上它做的就是广义上的 sharding。因此，我们也可以称 consistent hashing 是一种数据分片方法。在很多论文和现实系统中，都是如此使用 consistent hashing 的。
+
 # Part B Shard-Kv
 
 本部分要求实现一个支持 config change 功能的 sharded key value store。
